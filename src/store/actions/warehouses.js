@@ -1,0 +1,295 @@
+import { db } from '@/firebase/config';
+import { collection, query, where, orderBy, getDocs, addDoc, updateDoc, deleteDoc, doc, limit, serverTimestamp } from 'firebase/firestore';
+import { ensureFirebaseReady } from '../utils/firebase-utils';
+
+export default {
+  async loadWarehousesEnhanced({ commit, dispatch }) {
+    try {
+      console.log('🔄 Loading warehouses with enhanced filtering...');
+
+      const warehousesRef = collection(db, 'warehouses');
+      const q = query(warehousesRef, orderBy('name_ar'));
+      const snapshot = await getDocs(q);
+
+      const warehouses = snapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }))
+        .filter(warehouse => {
+          return warehouse.type !== 'dispatch';
+        });
+
+      commit('SET_WAREHOUSES', warehouses);
+      console.log(`✅ Warehouses loaded: ${warehouses.length} (dispatch warehouses excluded)`);
+
+      return warehouses;
+
+    } catch (error) {
+      console.error('❌ Error loading warehouses:', error);
+      dispatch('showNotification', {
+        type: 'error',
+        message: 'خطأ في تحميل المخازن'
+      });
+      return [];
+    }
+  },
+
+  async getDispatchWarehouses({ dispatch }) {
+    try {
+      console.log('🔄 Fetching dispatch warehouses from database...');
+      
+      console.log('⏳ Ensuring Firebase is ready for dispatch warehouses...');
+      await ensureFirebaseReady();
+      console.log('✅ Firebase ready for dispatch warehouses');
+
+      if (!db) {
+        console.error('❌ Firestore database not available');
+        throw new Error('Firestore database not available');
+      }
+
+      const firebaseFirestore = await import('firebase/firestore');
+      const {
+        collection,
+        query,
+        where,
+        orderBy,
+        getDocs
+      } = firebaseFirestore;
+
+      const warehousesRef = collection(db, 'warehouses');
+      const q = query(
+        warehousesRef,
+        where('type', '==', 'dispatch'),
+        orderBy('name_ar')
+      );
+
+      console.log('🔍 Executing dispatch warehouses query...');
+      const snapshot = await getDocs(q);
+      console.log(`📊 Found ${snapshot.size} dispatch warehouses in database`);
+      
+      const dispatchWarehouses = [];
+      
+      snapshot.forEach(doc => {
+        try {
+          const data = doc.data();
+          const warehouseId = doc.id;
+          
+          console.log(`📋 Warehouse ${warehouseId}:`, {
+            name_ar: data.name_ar,
+            name: data.name,
+            type: data.type,
+            is_active: data.is_active
+          });
+          
+          const arabicName = data.name_ar || data.name || warehouseId;
+          
+          const warehouse = {
+            id: warehouseId,
+            name_ar: arabicName,
+            name: data.name || '',
+            type: data.type || 'dispatch',
+            location: data.location || '',
+            is_active: data.is_active !== false,
+            is_main: data.is_main || false,
+            created_at: data.created_at,
+            updated_at: data.updated_at,
+            ...data
+          };
+          
+          dispatchWarehouses.push(warehouse);
+        } catch (docError) {
+          console.warn(`⚠️ Error processing warehouse document ${doc.id}:`, docError);
+        }
+      });
+
+      console.log(`✅ Dispatch warehouses loaded from database: ${dispatchWarehouses.length}`);
+      
+      if (dispatchWarehouses.length > 0) {
+        console.log('🎯 Final dispatch warehouses list:', 
+          dispatchWarehouses.map(w => ({ 
+            id: w.id, 
+            name_ar: w.name_ar,
+            name: w.name,
+            type: w.type,
+            is_active: w.is_active
+          }))
+        );
+      } else {
+        console.warn('⚠️ No dispatch warehouses found in database with type="dispatch"');
+        
+        const allWarehousesRef = collection(db, 'warehouses');
+        const allSnapshot = await getDocs(query(allWarehousesRef, limit(10)));
+        
+        const allWarehouses = allSnapshot.docs.map(doc => ({
+          id: doc.id,
+          name_ar: doc.data().name_ar,
+          name: doc.data().name,
+          type: doc.data().type || 'not specified'
+        }));
+        
+        console.log('📊 First 10 warehouses in database (all types):', allWarehouses);
+      }
+      
+      return dispatchWarehouses;
+
+    } catch (error) {
+      console.error('❌ Error loading dispatch warehouses:', error);
+      console.error('Error stack:', error.stack);
+      
+      dispatch('showNotification', {
+        type: 'error',
+        message: `خطأ في تحميل مخازن الصرف: ${error.message || 'يرجى التحقق من اتصال الإنترنت'}`
+      });
+      
+      return [];
+    }
+  },
+
+  async loadWarehouses({ dispatch }) {
+    try {
+      console.log('🔄 Loading warehouses...');
+
+      const warehousesRef = collection(db, 'warehouses');
+      const q = query(warehousesRef, orderBy('name_ar'));
+      const snapshot = await getDocs(q);
+
+      const warehouses = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      return warehouses;
+
+    } catch (error) {
+      console.error('❌ Error loading warehouses:', error);
+      dispatch('showNotification', {
+        type: 'error',
+        message: 'خطأ في تحميل المخازن'
+      });
+      return [];
+    }
+  },
+
+  async addWarehouse({ commit, state, dispatch }, warehouseData) {
+    try {
+      if (state.userProfile?.role !== 'superadmin') {
+        throw new Error('ليس لديك صلاحية لإضافة مخازن');
+      }
+      commit('SET_OPERATION_LOADING', true);
+
+      const warehouseToAdd = {
+        ...warehouseData,
+        is_active: true,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        created_by: state.userProfile?.name || state.user?.email
+      };
+
+      const docRef = await addDoc(collection(db, 'warehouses'), warehouseToAdd);
+
+      const newWarehouse = {
+        id: docRef.id,
+        ...warehouseToAdd
+      };
+
+      commit('SET_WAREHOUSES', [...state.warehouses, newWarehouse]);
+
+      dispatch('showNotification', {
+        type: 'success',
+        message: `تم إضافة المخزن "${warehouseData.name_ar}" بنجاح`
+      });
+
+      return newWarehouse;
+    } catch (error) {
+      console.error('❌ Error adding warehouse:', error);
+      dispatch('showNotification', {
+        type: 'error',
+        message: error.message || 'خطأ في إضافة المخزن'
+      });
+      throw error;
+    } finally {
+      commit('SET_OPERATION_LOADING', false);
+    }
+  },
+
+  async updateWarehouse({ commit, state, dispatch }, { warehouseId, warehouseData }) {
+    try {
+      if (state.userProfile?.role !== 'superadmin') {
+        throw new Error('ليس لديك صلاحية لتعديل المخازن');
+      }
+      commit('SET_OPERATION_LOADING', true);
+
+      const warehouseRef = doc(db, 'warehouses', warehouseId);
+      await updateDoc(warehouseRef, {
+        ...warehouseData,
+        updated_at: serverTimestamp(),
+        updated_by: state.userProfile?.name || state.user?.email
+      });
+
+      const updatedWarehouses = state.warehouses.map(w => 
+        w.id === warehouseId ? { ...w, ...warehouseData } : w
+      );
+      commit('SET_WAREHOUSES', updatedWarehouses);
+
+      dispatch('showNotification', {
+        type: 'success',
+        message: `تم تحديث المخزن بنجاح`
+      });
+
+      return true;
+    } catch (error) {
+      console.error('❌ Error updating warehouse:', error);
+      dispatch('showNotification', {
+        type: 'error',
+        message: error.message || 'خطأ في تحديث المخزن'
+      });
+      throw error;
+    } finally {
+      commit('SET_OPERATION_LOADING', false);
+    }
+  },
+
+  async deleteWarehouse({ commit, state, dispatch }, { warehouseId, warehouseName }) {
+    try {
+      if (state.userProfile?.role !== 'superadmin') {
+        throw new Error('ليس لديك صلاحية لحذف المخازن');
+      }
+      commit('SET_OPERATION_LOADING', true);
+
+      const confirmDelete = confirm(`هل أنت متأكد من حذف المخزن "${warehouseName}"؟`);
+      if (!confirmDelete) return;
+
+      const itemsRef = collection(db, 'items');
+      const q = query(itemsRef, where('warehouse_id', '==', warehouseId), limit(1));
+      const itemsSnapshot = await getDocs(q);
+
+      if (!itemsSnapshot.empty) {
+        throw new Error('لا يمكن حذف المخزن لأنه يحتوي على أصناف. يجب نقل الأصناف أولاً.');
+      }
+
+      const warehouseRef = doc(db, 'warehouses', warehouseId);
+      await deleteDoc(warehouseRef);
+
+      const updatedWarehouses = state.warehouses.filter(w => w.id !== warehouseId);
+      commit('SET_WAREHOUSES', updatedWarehouses);
+
+      dispatch('showNotification', {
+        type: 'success',
+        message: `تم حذف المخزن "${warehouseName}" بنجاح`
+      });
+
+      return true;
+    } catch (error) {
+      console.error('❌ Error deleting warehouse:', error);
+      commit('SET_OPERATION_ERROR', error.message);
+      dispatch('showNotification', {
+        type: 'error',
+        message: error.message || 'خطأ في حذف المخزن'
+      });
+      throw error;
+    } finally {
+      commit('SET_OPERATION_LOADING', false);
+    }
+  },
+};

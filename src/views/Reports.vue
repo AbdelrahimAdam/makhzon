@@ -1001,7 +1001,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick,reactive } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue';
 import { useStore } from 'vuex';
 import { Chart, registerables } from 'chart.js';
 import * as XLSX from 'xlsx';
@@ -1019,7 +1019,7 @@ export default {
     const showMobileFilters = ref(false);
     const activeMobileTab = ref('charts');
     const showInventoryFilters = ref(false);
-    const viewMode = ref('detailed'); // 'detailed' or 'simple'
+    const viewMode = ref('detailed');
     const isFullscreen = ref(false);
     
     // Mobile tabs configuration
@@ -1511,7 +1511,6 @@ export default {
     const formatNumber = (num) => {
       if (num === undefined || num === null) return '0';
       
-      // Handle string numbers with k/m
       if (typeof num === 'string' && (num.includes('k') || num.includes('m'))) {
         return num;
       }
@@ -1673,10 +1672,10 @@ export default {
       updateCharts();
     };
     
-    // Live search function from inventory page
+    // Live search function using SPARK search
     const performLiveSearch = async (searchTermValue) => {
       if (!searchTermValue || searchTermValue.trim().length < 2) {
-        liveSearchResults.length = 0; // Clear results
+        liveSearchResults.length = 0;
         isLiveSearching.value = false;
         return;
       }
@@ -1686,7 +1685,7 @@ export default {
       try {
         console.log('🔍 Performing live search in reports for:', searchTermValue);
         
-        // Use the store action to search Firestore directly
+        // Use the store action to search Firestore directly (SPARK search)
         const searchResults = await store.dispatch('searchItems', {
           searchTerm: searchTermValue,
           limitResults: 50
@@ -1695,7 +1694,7 @@ export default {
         console.log('✅ Live search results in reports:', searchResults.length, 'items');
         
         // Update live search results
-        liveSearchResults.length = 0; // Clear previous results
+        liveSearchResults.length = 0;
         searchResults.forEach(item => {
           liveSearchResults.push(item);
         });
@@ -1718,21 +1717,18 @@ export default {
     
     // Handle search input with live search
     const handleSearch = () => {
-      // Clear any existing timeout
       if (liveSearchTimeout.value) {
         clearTimeout(liveSearchTimeout.value);
       }
       
-      // Debounce the live search
       liveSearchTimeout.value = setTimeout(() => {
         if (searchQuery.value && searchQuery.value.trim().length >= 2) {
           debouncedLiveSearch(searchQuery.value.trim());
         } else {
-          // Clear live search results if search term is too short
           liveSearchResults.length = 0;
           isLiveSearching.value = false;
         }
-        applyFilters(); // Apply regular filters
+        applyFilters();
       }, 300);
     };
     
@@ -2016,7 +2012,7 @@ export default {
       const ctx = trendsChart.value?.getContext('2d');
       if (!ctx) return;
       
-      const months = monthlyStats.value.mons || [];
+      const months = monthlyStats.value.months || [];
       const data = monthlyStats.value.monthlyData || [];
       
       if (months.length === 0 || data.length === 0) {
@@ -2277,21 +2273,23 @@ export default {
       }
     };
     
-    // One-time data load optimization
+    // One-time data load optimization - updated with correct action names
     const loadInitialData = async () => {
       loading.value = true;
       try {
-        // Load essential data first
+        // Load warehouses
+        await store.dispatch('loadWarehouses');
+        
+        // Load recent transactions and dashboard stats
         await Promise.all([
           store.dispatch('getRecentTransactions', { limit: 50 }),
-          store.dispatch('getDashboardStats'),
-          store.dispatch('getWarehouses')
+          store.dispatch('getDashboardStats')
         ]);
         
-        // Load additional data in background
+        // Load inventory and all transactions in background
         setTimeout(() => {
-          store.dispatch('getInventory');
-          store.dispatch('getAllTransactions');
+          store.dispatch('loadAllInventory');
+          store.dispatch('fetchTransactions');
         }, 1000);
         
         // Cache data

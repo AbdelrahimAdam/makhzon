@@ -573,14 +573,8 @@
         </div>
       </div>
 
-      <!-- Warehouse Loading Indicator -->
-      <div v-if="warehouseLoading" class="text-center py-8">
-        <div class="inline-block animate-spin rounded-full h-10 w-10 border-b-2 border-yellow-600 mb-3"></div>
-        <p class="text-sm text-gray-600 dark:text-gray-400">جاري تحميل جميع أصناف المخزن...</p>
-      </div>
-
       <!-- Loading State -->
-      <div v-else-if="loading && !displayedItems?.length" class="text-center py-8 sm:py-12">
+      <div v-if="loading && !displayedItems?.length" class="text-center py-8 sm:py-12">
         <div class="inline-block animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-b-2 border-yellow-600 mb-3 sm:mb-4"></div>
         <p class="text-sm sm:text-base text-gray-600 dark:text-gray-400">جاري تحميل المخزون...</p>
         <p v-if="totalLoaded > 0" class="text-xs sm:text-sm text-gray-500 mt-1 sm:mt-2">تم تحميل {{ totalLoaded }} عنصر</p>
@@ -1343,10 +1337,6 @@ export default {
     const statusFilter = ref('');
     const selectedWarehouse = ref('');
     
-    // ===== NEW REFS FOR WAREHOUSE‑SPECIFIC LOADING =====
-    const warehouseItems = ref([]);
-    const warehouseLoading = ref(false);
-    
     // Virtual Scrolling
     const scrollContainer = ref(null);
     const mobileScrollContainer = ref(null);
@@ -1386,21 +1376,18 @@ export default {
     
     const filteredInventory = computed(() => {
       let items = allInventory.value;
-      
       if (selectedWarehouse.value) {
         items = items.filter(item => item.warehouse_id === selectedWarehouse.value);
       }
-      
       if (statusFilter.value) {
         items = items.filter(item => {
           const quantity = item.remaining_quantity || 0;
-          if (statusFilter.value === 'in_stock') return quantity >= 500; // Changed from 10 to 500
-          if (statusFilter.value === 'low_stock') return quantity > 0 && quantity < 500; // Changed from 10 to 500
+          if (statusFilter.value === 'in_stock') return quantity >= 500;
+          if (statusFilter.value === 'low_stock') return quantity > 0 && quantity < 500;
           if (statusFilter.value === 'out_of_stock') return quantity === 0;
           return true;
         });
       }
-      
       return items;
     });
     
@@ -1418,40 +1405,17 @@ export default {
       return searchTerm.value && searchTerm.value.length >= 2 && (searchResults.value?.length || 0) > 0;
     });
     
-    // ========== UPDATED displayedItems COMPUTED ==========
+    // ========== SIMPLIFIED displayedItems COMPUTED ==========
     const displayedItems = computed(() => {
-      // If a specific warehouse is selected AND we have loaded its items,
-      // show those items (optionally filtered further by search/status)
-      if (selectedWarehouse.value && warehouseItems.value?.length > 0) {
-        let items = warehouseItems.value;
-
-        // Apply status filter locally
-        if (statusFilter.value) {
-          items = items.filter(item => {
-            const qty = item.remaining_quantity || 0;
-            if (statusFilter.value === 'in_stock') return qty >= 500;
-            if (statusFilter.value === 'low_stock') return qty > 0 && qty < 500;
-            if (statusFilter.value === 'out_of_stock') return qty === 0;
-            return true;
-          });
-        }
-
-        // Apply search locally (if you want to support search inside warehouse view)
-        if (searchTerm.value && searchTerm.value.length >= 2) {
-          items = fuzzyLocalSearch(items, searchTerm.value, selectedWarehouse.value, 50);
-        }
-
-        return items;
-      }
-
       // If search mode is active, use search results
       if (isSearchMode.value) {
         return searchResults.value || [];
       }
 
-      // Otherwise fall back to the regular filtered inventory (cached + paginated)
+      // Otherwise use filtered inventory (already filtered by warehouse via `selectedWarehouse`)
       let items = filteredInventory.value || [];
 
+      // Apply local search if term is present (this will search within the filtered warehouse items)
       if (searchTerm.value && searchTerm.value.length >= 2) {
         items = fuzzyLocalSearch(items, searchTerm.value, selectedWarehouse.value, 50) || [];
       }
@@ -1518,7 +1482,7 @@ export default {
     const lowStockCount = computed(() => {
       return displayedItems.value.filter(item => {
         const quantity = item.remaining_quantity || 0;
-        return quantity > 0 && quantity <= 500; // Changed to <= 500
+        return quantity > 0 && quantity <= 500;
       }).length;
     });
     
@@ -1549,7 +1513,7 @@ export default {
     const readonly = computed(() => userRole.value === 'viewer');
 
     // ============================================
-    // VIRTUAL SCROLLING COMPUTED PROPERTIES (Keep existing)
+    // VIRTUAL SCROLLING COMPUTED PROPERTIES
     // ============================================
     const visibleItems = computed(() => {
       const items = displayedItems.value || [];
@@ -1566,7 +1530,7 @@ export default {
     });
 
     // ============================================
-    // ENHANCED STORE SEARCH SYSTEM (Keep existing)
+    // ENHANCED STORE SEARCH SYSTEM
     // ============================================
     const handleLiveSearch = debounce(async () => {
       const term = searchTerm.value.trim();
@@ -1623,31 +1587,13 @@ export default {
     }, 500);
 
     // ============================================
-    // FILTER HANDLERS (UPDATED handleWarehouseChange)
+    // FILTER HANDLERS (SIMPLIFIED)
     // ============================================
-    const handleWarehouseChange = async () => {
+    const handleWarehouseChange = () => {
       resetScrollPositions();
-
-      if (selectedWarehouse.value) {
-        warehouseLoading.value = true;
-        warehouseItems.value = []; // clear previous items
-        try {
-          // Fetch ALL items for this warehouse from the server
-          warehouseItems.value = await store.dispatch('loadAllItemsForWarehouse', selectedWarehouse.value);
-        } catch (error) {
-          console.error('Error loading warehouse items:', error);
-          warehouseItems.value = [];
-        } finally {
-          warehouseLoading.value = false;
-        }
-      } else {
-        // "All warehouses" – clear warehouse-specific items
-        warehouseItems.value = [];
-      }
-
       // If a search term is active, re‑run the search (optional)
       if (searchTerm.value.trim() && searchTerm.value.trim().length >= 2) {
-        await handleLiveSearch();
+        handleLiveSearch();
       }
     };
     
@@ -1771,7 +1717,7 @@ export default {
     };
 
     // ============================================
-    // DATA LOADING METHODS (Keep existing with optimization)
+    // DATA LOADING METHODS
     // ============================================
     const loadInitialData = async () => {
       try {
@@ -1897,19 +1843,19 @@ export default {
     // ============================================
     const getStockStatus = (quantity) => {
       if (quantity === 0) return 'منتهي';
-      if (quantity <= 500) return 'كمية قليلة'; // Changed from < 10 to <= 500
+      if (quantity <= 500) return 'كمية قليلة';
       return 'متوفر';
     };
     
     const getStockStatusClass = (quantity) => {
       if (quantity === 0) return 'bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-800 shadow-sm';
-      if (quantity <= 500) return 'bg-orange-100 dark:bg-orange-900/20 text-orange-800 dark:text-orange-200 border border-orange-200 dark:border-orange-800 shadow-sm'; // Changed from < 10 to <= 500
+      if (quantity <= 500) return 'bg-orange-100 dark:bg-orange-900/20 text-orange-800 dark:text-orange-200 border border-orange-200 dark:border-orange-800 shadow-sm';
       return 'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-800 shadow-sm';
     };
     
     const getQuantityClass = (quantity) => {
       if (quantity === 0) return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/10';
-      if (quantity <= 500) return 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/10'; // Changed from < 10 to <= 500
+      if (quantity <= 500) return 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/10';
       return 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/10';
     };
     
@@ -1923,7 +1869,7 @@ export default {
     };
 
     // ============================================
-    // ITEM ACTION HANDLERS WITH STORE INTEGRATION (Keep existing)
+    // ITEM ACTION HANDLERS WITH STORE INTEGRATION
     // ============================================
     const canEditItem = (item) => {
       if (userRole.value === 'superadmin') return true;
@@ -2246,8 +2192,8 @@ export default {
     };
     
     const handleDispatchSuccess = async (result) => {
-      showDispatchModal.value = false;
-      selectedItemForDispatch.value = null;
+      // showDispatchModal.value = false;        // ✅ REMOVED – modal stays open
+      selectedItemForDispatch.value = null;      // Clear the selected item for next dispatch
       
       console.log('✅ handleDispatchSuccess called with result:', result);
       
@@ -2279,7 +2225,7 @@ export default {
     };
 
     // ============================================
-    // HELPER FUNCTIONS (Keep existing)
+    // HELPER FUNCTIONS
     // ============================================
     const formatNumber = (num) => new Intl.NumberFormat('en-US').format(num || 0);
     
@@ -2378,7 +2324,7 @@ export default {
     };
 
     // ============================================
-    // EXCEL EXPORT (Keep existing)
+    // EXCEL EXPORT
     // ============================================
     const exportToExcel = async () => {
       if (!displayedItems.value?.length) {
@@ -2493,7 +2439,7 @@ export default {
     };
 
     // ============================================
-    // VIRTUAL SCROLLING METHODS (Keep existing)
+    // VIRTUAL SCROLLING METHODS
     // ============================================
     const calculateVisibleItems = () => {
       if (!scrollContainer.value) return;
@@ -2642,7 +2588,7 @@ export default {
     };
 
     // ============================================
-    // WATCHERS (Keep existing)
+    // WATCHERS
     // ============================================
     watch(inventoryLoading, (newVal) => {
       if (!newVal && inventoryLoaded.value) {
@@ -2692,7 +2638,7 @@ export default {
     });
 
     // ============================================
-    // LIFECYCLE HOOKS (Keep existing)
+    // LIFECYCLE HOOKS
     // ============================================
     onMounted(async () => {
       console.log('📱 Inventory Production mounted with OPTIMIZED STORE COMPLIANCE');
@@ -2759,9 +2705,6 @@ export default {
       searchTerm,
       statusFilter,
       selectedWarehouse,
-      
-      // NEW REFS
-      warehouseLoading,
       
       // Mobile UI
       showFilters,

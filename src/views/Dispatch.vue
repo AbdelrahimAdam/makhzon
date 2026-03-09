@@ -1491,9 +1491,9 @@
                       {{ getWarehouseLabel(dispatch.from_warehouse) || 'غير محدد' }}
                     </div>
 
-                    <!-- Destination -->
+                    <!-- Destination - FIXED: Now uses store getter -->
                     <div class="col-span-2 px-2 text-sm text-gray-900 dark:text-white truncate">
-                      {{ getDestinationLabel(dispatch.destination || dispatch.to_warehouse) || 'خارج النظام' }}
+                      {{ store.getters.getDispatchDestinationName(dispatch) }}
                     </div>
 
                     <!-- Value -->
@@ -1564,7 +1564,7 @@
                       </div>
                       <div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">إلى</div>
-                        <div class="font-medium text-gray-900 dark:text-white truncate">{{ getDestinationLabel(dispatch.destination || dispatch.to_warehouse) }}</div>
+                        <div class="font-medium text-gray-900 dark:text-white truncate">{{ store.getters.getDispatchDestinationName(dispatch) }}</div>
                       </div>
                       <div>
                         <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">القيمة</div>
@@ -1658,7 +1658,6 @@
     </div>
   </div>
 </template>
-
 <script>
 import { ref, computed, onMounted, watch, onUnmounted } from 'vue';
 import { useStore } from 'vuex';
@@ -1682,6 +1681,21 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/firebase/config';
 import DispatchModal from '@/components/inventory/DispatchModal.vue';
+
+// Common dispatch destination mappings (kept for local fallback)
+const COMMON_DISPATCH_DESTINATIONS = {
+  'dubi_factory': 'مصنع دبي',
+  'external_wharehouse': 'صرف خارجي',
+  'factory': 'مصنع البران',
+  'dispat_item': 'موقع صرف',
+  'zahra': 'صرف الي مخزن الزهراء',
+  'ghabashi': 'مخزن الغباشي',
+  'al_ghabashi': 'مخزن الغباشي',
+  'dispatch': 'صرف خارجي',
+  'external': 'صرف خارجي',
+  'main': 'المخزن الرئيسي',
+  'primary': 'المخزن الرئيسي'
+};
 
 export default {
   name: 'DispatchPageWithInvoices',
@@ -2166,10 +2180,34 @@ export default {
       return warehouse ? warehouse.name_ar : warehouseId;
     };
     
+    // ✅ LOCAL FALLBACK: Enhanced getDestinationLabel with common mappings (used internally, not in template)
     const getDestinationLabel = (destinationId) => {
       if (!destinationId) return '';
-      const destination = allWarehouses.value.find(w => w.id === destinationId);
-      return destination ? destination.name_ar : destinationId;
+      
+      // First check if it's a warehouse ID
+      const warehouse = allWarehouses.value.find(w => w.id === destinationId);
+      if (warehouse) {
+        return warehouse.name_ar || warehouse.name || destinationId;
+      }
+      
+      // Then check common dispatch destinations
+      if (COMMON_DISPATCH_DESTINATIONS[destinationId]) {
+        return COMMON_DISPATCH_DESTINATIONS[destinationId];
+      }
+      
+      // If it's a string that might contain a warehouse name, try to find partial match
+      const partialMatch = allWarehouses.value.find(w => 
+        w.id.toLowerCase().includes(destinationId.toLowerCase()) ||
+        (w.name_ar && w.name_ar.toLowerCase().includes(destinationId.toLowerCase())) ||
+        (w.name_en && w.name_en.toLowerCase().includes(destinationId.toLowerCase()))
+      );
+      
+      if (partialMatch) {
+        return partialMatch.name_ar || partialMatch.name || destinationId;
+      }
+      
+      // Fallback to the original string
+      return destinationId;
     };
     
     const getDateFilterLabel = (filter) => {
@@ -2602,123 +2640,45 @@ export default {
       selectedItemForDispatch.value = null;
     };
     
-    const handleDispatchSuccess = async (dispatchData) => {
+    // ✅ CORRECTED: handleDispatchSuccess – only process result, no duplicate dispatch
+    const handleDispatchSuccess = async (result) => {
       try {
-        console.log('🚀 Starting dispatch from page with data:', dispatchData);
-        console.log('📋 Complete dispatch data received:', dispatchData);
+        console.log('✅ Dispatch successful, received result:', result);
         
-        // ✅ FIXED: Check for all possible field names
-        // Get item ID from multiple possible fields
-        const itemId = dispatchData.item_id || dispatchData.id;
-        if (!itemId) {
-          console.error('Missing item_id/id. Data:', dispatchData);
-          throw new Error('معرف الصنف (item_id أو id) مفقود');
-        }
-        
-        // Get from warehouse ID from multiple possible fields
-        const fromWarehouseId = dispatchData.from_warehouse_id || dispatchData.sourceWarehouse;
-        if (!fromWarehouseId) {
-          console.error('Missing from_warehouse_id/sourceWarehouse. Data:', dispatchData);
-          throw new Error('المخزن المصدر (from_warehouse_id أو sourceWarehouse) مفقود');
-        }
-        
-        // Get destination from multiple possible fields
-        let destination = dispatchData.destination;
-        if (!destination) {
-          destination = getDestinationLabel(dispatchData.destination_id) || 
-                       getDestinationLabel(dispatchData.destinationBranch) ||
-                       'موقع صرف';
-        }
-        
-        const destinationId = dispatchData.destination_id || dispatchData.destinationBranch || 'external';
-        
-        // Get additional required data
-        const itemName = dispatchData.item_name || selectedItemForDispatch.value?.name || 'صنف غير محدد';
-        const itemCode = dispatchData.item_code || selectedItemForDispatch.value?.code || '';
-        const fromWarehouseName = dispatchData.from_warehouse_name || getWarehouseLabel(fromWarehouseId);
-        
-        // Validate required fields
-        const missingFields = [];
-        if (!itemId) missingFields.push('item_id أو id');
-        if (!fromWarehouseId) missingFields.push('from_warehouse_id أو sourceWarehouse');
-        if (!destination) missingFields.push('destination أو destination_id أو destinationBranch');
-        
-        if (missingFields.length > 0) {
-          console.error('❌ Missing required fields:', missingFields);
-          console.error('Received data:', dispatchData);
-          throw new Error(`بيانات الصرف غير مكتملة. الحقول المفقودة: ${missingFields.join('، ')}`);
-        }
-
-        // Prepare dispatch payload EXACTLY as store expects
-        const dispatchPayload = {
-          // REQUIRED FIELDS (must match store validation)
-          item_id: itemId,
-          from_warehouse_id: fromWarehouseId,
-          destination: destination,
-          
-          // Detailed quantities (match store field names)
-          cartons_count: dispatchData.cartons_count || 0,
-          single_bottles_count: dispatchData.single_bottles_count || 0,
-          per_carton_count: dispatchData.per_carton_count || 12,
-          quantity: dispatchData.quantity || 0,
-          
-          // Additional data (match store field names)
-          item_name: itemName,
-          item_code: itemCode,
-          from_warehouse_name: fromWarehouseName,
-          destination_id: destinationId,
-          notes: dispatchData.notes || 'صرف من خلال نظام الصرف',
-          priority: dispatchData.priority || 'normal'
-        };
-
-        console.log('📤 Sending to store dispatchItem with payload:', dispatchPayload);
-        
-        // Call store dispatch action with properly formatted payload
-        const result = await store.dispatch('dispatchItem', dispatchPayload);
-
-        if (result?.success) {
-          console.log('✅ Dispatch successful:', result);
-          
-          showDispatchModal.value = false;
-          selectedItemForDispatch.value = null;
-          currentHistoryPage.value = 1;
-          
+        if (!result) {
+          console.error('❌ No result received from modal');
           store.dispatch('showNotification', {
-            type: 'success',
-            title: 'تم الصرف بنجاح',
-            message: result.message || `تم صرف ${result.detailedUpdate?.remaining_quantity || 0} وحدة بنجاح`
+            type: 'error',
+            message: 'حدث خطأ غير متوقع'
           });
-          
-          // ✅ NEW: Refresh transactions from store (includes dispatch history)
-          await store.dispatch('fetchTransactions');
-          
-          return result;
-        } else {
-          const errorMsg = result?.message || result?.error || 'فشل في عملية الصرف';
-          throw new Error(errorMsg);
+          return;
         }
+
+        // Show success notification using the result's message
+        store.dispatch('showNotification', {
+          type: 'success',
+          title: 'تم الصرف بنجاح',
+          message: result.message || `تم صرف ${result.quantity || 0} وحدة بنجاح`
+        });
+
+        // Close modal and reset selected item
+        showDispatchModal.value = false;
+        selectedItemForDispatch.value = null;
+
+        // Refresh transactions to update history (optional, but good)
+        await store.dispatch('fetchTransactions');
+
+        // Optionally refresh inventory if needed
+        // await store.dispatch('refreshInventorySilently');
+
+        console.log('✅ handleDispatchSuccess completed successfully');
         
       } catch (error) {
-        console.error('❌ Error in dispatch:', error);
-        console.error('Error details:', error.stack);
-        
-        // Show detailed error message
-        let errorMessage = error.message || 'حدث خطأ في عملية الصرف';
-        
-        // Add more context for common errors
-        if (error.message.includes('بيانات الصرف غير مكتملة')) {
-          errorMessage += ' - يرجى التحقق من بيانات الصرف المطلوبة';
-        } else if (error.message.includes('ليس لديك صلاحية')) {
-          errorMessage += ' - يرجى التحقق من صلاحيات المستخدم';
-        }
-        
+        console.error('❌ Error in handleDispatchSuccess:', error);
         store.dispatch('showNotification', {
           type: 'error',
-          title: 'فشل الصرف',
-          message: errorMessage
+          message: 'حدث خطأ أثناء معالجة نتيجة الصرف'
         });
-        
-        throw error; // Re-throw to let component handle it if needed
       }
     };
     
@@ -2774,7 +2734,7 @@ export default {
 • الكود: ${dispatch.item_code || 'N/A'}
 • الكمية: ${quantity} وحدة
 • من مخزن: ${getWarehouseLabel(dispatch.from_warehouse)}
-• إلى: ${getDestinationLabel(dispatch.destination || dispatch.to_warehouse)}
+• إلى: ${store.getters.getDispatchDestinationName(dispatch)}
 • التاريخ: ${formatDateTime(dispatch.timestamp)}
 • القيمة: ${formatCurrency(calculateDispatchValue(dispatch))}
 • تم بواسطة: ${dispatch.user_name || dispatch.created_by || 'مستخدم النظام'}
@@ -2845,7 +2805,7 @@ export default {
             </tr>
             <tr>
               <th>إلى</th>
-              <td>${getDestinationLabel(dispatch.destination || dispatch.to_warehouse)}</td>
+              <td>${store.getters.getDispatchDestinationName(dispatch)}</td>
             </tr>
             <tr>
               <th>تاريخ الصرف</th>
@@ -2910,7 +2870,7 @@ export default {
           'كود الصنف': dispatch.item_code || '',
           'الكمية': calculateDispatchQuantity(dispatch),
           'من مخزن': getWarehouseLabel(dispatch.from_warehouse),
-          'إلى': getDestinationLabel(dispatch.destination || dispatch.to_warehouse),
+          'إلى': store.getters.getDispatchDestinationName(dispatch),
           'القيمة': calculateDispatchValue(dispatch),
           'تم بواسطة': dispatch.user_name || dispatch.created_by || 'مستخدم النظام',
           'ملاحظات': dispatch.notes || ''
@@ -3753,66 +3713,33 @@ ${invoice.type === 'B2B' || invoice.type === 'B2C' ? `الضريبة (14%): ${fo
       }
     };
     
+    // ✅ FIXED: deleteInvoice – uses store and confirms in UI
     const deleteInvoice = async (invoiceId) => {
       if (!confirm('هل أنت متأكد من حذف هذه الفاتورة؟')) return;
       
       try {
         loading.value = true;
-        
-        const invoice = invoices.value.find(inv => inv.id === invoiceId);
-        if (invoice && invoice.items) {
-          const batch = writeBatch(db);
-          
-          for (const item of invoice.items) {
-            if (item.id) {
-              const itemRef = doc(db, 'items', item.id);
-              batch.update(itemRef, {
-                remaining_quantity: increment(item.quantity || 0)
-              });
-            }
-          }
-          
-          await batch.commit();
+        const result = await store.dispatch('deleteInvoice', invoiceId);
+        if (result.success) {
+          await loadInvoices();
         }
-        
-        const invoiceRef = doc(db, 'invoices', invoiceId);
-        await deleteDoc(invoiceRef);
-        
-        await loadInvoices();
-        
-        store.dispatch('showNotification', {
-          type: 'success',
-          message: 'تم حذف الفاتورة بنجاح'
-        });
-        
       } catch (error) {
         console.error('Error deleting invoice:', error);
         store.dispatch('showNotification', {
           type: 'error',
-          message: 'حدث خطأ أثناء حذف الفاتورة'
+          message: error.message || 'حدث خطأ أثناء حذف الفاتورة'
         });
       } finally {
         loading.value = false;
       }
     };
     
+    // ✅ FIXED: saveInvoice – now uses store actions
     const saveInvoice = async () => {
       if (!canSaveInvoice.value) return;
       
       try {
         saving.value = true;
-        
-        // ✅ UPDATED: Enhanced tax validation for B2B invoices
-        if (invoiceForm.value.type === 'B2B') {
-          if (!invoiceForm.value.customer.taxId || invoiceForm.value.customer.taxId.length < 9) {
-            store.dispatch('showNotification', {
-              type: 'error',
-              message: 'يرجى إدخال رقم ضريبي صالح (9 أرقام على الأقل) للفواتير الضريبية B2B'
-            });
-            saving.value = false;
-            return;
-          }
-        }
         
         // Enhanced phone validation
         const phoneRegex = /^01[0-2,5]{1}[0-9]{8}$/;
@@ -3825,102 +3752,83 @@ ${invoice.type === 'B2B' || invoice.type === 'B2C' ? `الضريبة (14%): ${fo
           return;
         }
         
-        // Calculate invoice totals with carton logic
-        const subtotal = invoiceForm.value.items.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
-        const discount = invoiceForm.value.items.reduce((sum, item) => sum + ((item.unitPrice * item.quantity) * (item.discount / 100)), 0);
-        const tax = (invoiceForm.value.type === 'B2B' || invoiceForm.value.type === 'B2C') ? (subtotal - discount) * 0.14 : 0;
-        const total = subtotal - discount + tax;
-        
-        const invoiceData = {
-          ...invoiceForm.value,
-          warehouseId: selectedWarehouseForInvoice.value,
-          subtotal,
-          discount,
-          taxAmount: tax,
-          totalAmount: total,
-          date: Timestamp.now(),
-          createdBy: userProfile.value?.name || userName.value,
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now()
-        };
-        
-        let invoiceId;
-        
-        if (editingInvoice.value) {
-          const invoiceRef = doc(db, 'invoices', editingInvoice.value.id);
-          await updateDoc(invoiceRef, invoiceData);
-          invoiceId = editingInvoice.value.id;
-          
-          store.dispatch('showNotification', {
-            type: 'success',
-            message: 'تم تحديث الفاتورة بنجاح'
-          });
-        } else {
-          const lastInvoice = invoices.value[0];
-          const lastNumber = lastInvoice ? lastInvoice.invoiceNumber : 0;
-          const invoiceNumber = lastNumber + 1;
-          
-          invoiceData.invoiceNumber = invoiceNumber;
-          const docRef = await addDoc(collection(db, 'invoices'), invoiceData);
-          invoiceId = docRef.id;
-          
-          store.dispatch('showNotification', {
-            type: 'success',
-            message: `تم إنشاء الفاتورة #${invoiceNumber} بنجاح`
-          });
-        }
-        
-        // Dispatch items with carton logic
-        for (const item of invoiceForm.value.items) {
-          try {
-            // Prepare dispatch data with carton details
-            const dispatchData = {
-              item_id: item.id,
-              from_warehouse_id: selectedWarehouseForInvoice.value,
-              from_warehouse_name: getWarehouseLabel(selectedWarehouseForInvoice.value),
-              destination: `فاتورة #${invoiceData.invoiceNumber}`,
-              destination_id: invoiceId,
-              item_name: item.name,
-              item_code: item.code,
-              notes: `صرف عبر فاتورة #${invoiceData.invoiceNumber} - عميل: ${invoiceForm.value.customer.name}`,
-              priority: 'normal'
-            };
-            
-            // Add carton details if applicable
-            if (item.cartons_count > 0) {
-              dispatchData.cartons_count = item.cartons_count;
-              dispatchData.per_carton_count = item.per_carton_count;
-            }
-            
-            if (item.single_bottles_count > 0) {
-              dispatchData.single_bottles_count = item.single_bottles_count;
-            }
-            
-            // Always include total quantity
-            dispatchData.quantity = item.quantity;
-            
-            await store.dispatch('dispatchItem', dispatchData);
-            
-          } catch (dispatchError) {
-            console.error(`Error dispatching item ${item.name}:`, dispatchError);
+        // Tax validation for B2B
+        if (invoiceForm.value.type === 'B2B') {
+          if (!invoiceForm.value.customer.taxId || invoiceForm.value.customer.taxId.length < 9) {
             store.dispatch('showNotification', {
               type: 'error',
-              message: `خطأ في صرف الصنف ${item.name}: ${dispatchError.message}`
+              message: 'يرجى إدخال رقم ضريبي صالح (9 أرقام على الأقل) للفواتير الضريبية'
             });
+            saving.value = false;
+            return;
           }
         }
         
-        cancelInvoiceForm();
-        await loadInvoices();
+        // Calculate totals (store will recalc, but we pass them for consistency)
+        const subtotal = invoiceForm.value.items.reduce((sum, item) => 
+          sum + (item.unitPrice * item.quantity), 0);
+        const discount = invoiceForm.value.items.reduce((sum, item) => 
+          sum + ((item.unitPrice * item.quantity) * (item.discount / 100)), 0);
+        const tax = (invoiceForm.value.type === 'B2B' || invoiceForm.value.type === 'B2C') 
+          ? (subtotal - discount) * 0.14 : 0;
+        const total = subtotal - discount + tax;
         
-        // ✅ CORRECTED: Refresh transactions from store (includes dispatch history)
-        await store.dispatch('fetchTransactions');
+        const invoicePayload = {
+          type: invoiceForm.value.type,
+          paymentMethod: invoiceForm.value.paymentMethod,
+          customer: { ...invoiceForm.value.customer },
+          items: invoiceForm.value.items.map(item => ({
+            id: item.id,
+            name: item.name,
+            code: item.code,
+            unitPrice: Number(item.unitPrice) || 0,
+            quantity: Number(item.quantity) || 0,
+            discount: Number(item.discount) || 0,
+            total: Number(item.total) || 0,
+            warehouseId: item.warehouseId || selectedWarehouseForInvoice.value
+          })),
+          warehouseId: selectedWarehouseForInvoice.value,
+          notes: invoiceForm.value.notes || '',
+          status: 'draft',
+          // We can pass calculated totals, but store may recalc
+          subtotal,
+          discount,
+          taxAmount: tax,
+          totalAmount: total
+        };
+        
+        let result;
+        
+        if (editingInvoice.value) {
+          // ✅ Use store's updateInvoice
+          result = await store.dispatch('updateInvoice', {
+            invoiceId: editingInvoice.value.id,
+            invoiceData: invoicePayload
+          });
+        } else {
+          // ✅ Use store's createInvoice
+          result = await store.dispatch('createInvoice', invoicePayload);
+        }
+        
+        if (result?.success) {
+          // Success – close form and refresh lists
+          cancelInvoiceForm();
+          await loadInvoices();
+          await store.dispatch('fetchTransactions'); // refresh dispatch history if needed
+          
+          store.dispatch('showNotification', {
+            type: 'success',
+            message: result.message || 'تم حفظ الفاتورة بنجاح'
+          });
+        } else {
+          throw new Error(result?.message || 'فشل حفظ الفاتورة');
+        }
         
       } catch (error) {
         console.error('Error saving invoice:', error);
         store.dispatch('showNotification', {
           type: 'error',
-          message: 'حدث خطأ أثناء حفظ الفاتورة'
+          message: error.message || 'حدث خطأ أثناء حفظ الفاتورة'
         });
       } finally {
         saving.value = false;
@@ -4322,7 +4230,7 @@ ${invoice.type === 'B2B' || invoice.type === 'B2C' ? `الضريبة (14%): ${fo
       formatTime,
       formatDateTime,
       getWarehouseLabel,
-      getDestinationLabel,
+      getDestinationLabel,  // kept for internal use (fallback)
       getDateFilterLabel,
       getSearchSourceLabel,
       calculateDispatchQuantity,
@@ -4339,7 +4247,7 @@ ${invoice.type === 'B2B' || invoice.type === 'B2C' ? `الضريبة (14%): ${fo
       selectItemForDispatch,
       updateAvailableItems,
       handleModalClose,
-      handleDispatchSuccess,
+      handleDispatchSuccess, // ✅ corrected version
       handleSearch,
       handleDispatchSearch,
       applyHistoryFilters,
@@ -4377,11 +4285,15 @@ ${invoice.type === 'B2B' || invoice.type === 'B2C' ? `الضريبة (14%): ${fo
       deleteInvoice,
       saveInvoice,
       saveAndPrint,
-      exportInvoicesToExcel
+      exportInvoicesToExcel,
+      
+      // ✅ ADDED: Store instance for template access
+      store
     };
   }
 };
 </script>
+
 <style scoped>
 /* Fixed layout styles */
 

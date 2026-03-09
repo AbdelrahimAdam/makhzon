@@ -817,13 +817,21 @@ export default {
       return 'text-green-600 dark:text-green-400'
     }
 
-    // Select item function
+    // ============================================================
+    //  UPDATED selectItem – uses latest inventory data
+    // ============================================================
     const selectItem = (item) => {
       if ((!isSuperadmin.value && !canPerformDispatch.value) || 
           (item.remaining_quantity || item.quantity || 0) <= 0) {
         return
       }
-      selectedItem.value = item
+      // 🔥 Get the latest version from inventory to ensure correct quantity
+      const latestItem = inventory.value.find(i => i.id === item.id)
+      if (latestItem) {
+        selectedItem.value = latestItem
+      } else {
+        selectedItem.value = item
+      }
       form.quantity = 1
     }
 
@@ -838,7 +846,7 @@ export default {
       }
     }
 
-    // Calculate detailed dispatch breakdown
+    // Calculate detailed dispatch breakdown (for display only – not sent to store)
     const calculateDetailedDispatch = (currentItem, dispatchQuantity) => {
       const perCarton = currentItem.per_carton_count || 12
       const currentCartons = currentItem.cartons_count || 0
@@ -1147,30 +1155,21 @@ export default {
       form.quantity = maxQuantity
     }
 
-    // Handle submit with store dispatch
+    // ============================================================
+    //  UPDATED handleSubmit – sends only quantity & stays open
+    //  AND includes item_name, item_code for transaction display
+    // ============================================================
     const handleSubmit = async () => {
       error.value = ''
       successMessage.value = ''
       
       // Validation
       const errors = []
-      
-      if (!form.sourceWarehouse) {
-        errors.push('يرجى اختيار المخزن المصدر')
-      }
-      
-      if (!form.destinationBranch) {
-        errors.push('يرجى اختيار الوجهة')
-      }
-      
-      if (!selectedItem.value) {
-        errors.push('يرجى اختيار صنف للصرف')
-      }
-      
-      if (!form.quantity || form.quantity <= 0) {
-        errors.push('يرجى إدخال كمية صحيحة')
-      }
-      
+      if (!form.sourceWarehouse) errors.push('يرجى اختيار المخزن المصدر')
+      if (!form.destinationBranch) errors.push('يرجى اختيار الوجهة')
+      if (!selectedItem.value) errors.push('يرجى اختيار صنف للصرف')
+      if (!form.quantity || form.quantity <= 0) errors.push('يرجى إدخال كمية صحيحة')
+
       if (errors.length > 0) {
         error.value = errors.join('، ')
         return
@@ -1178,180 +1177,77 @@ export default {
 
       const currentItem = selectedItem.value
       const totalToDispatch = form.quantity
-      
-      // Validate available quantity
       const availableQuantity = currentItem.remaining_quantity || currentItem.quantity || 0
+
       if (totalToDispatch > availableQuantity) {
         error.value = `الكمية المطلوبة (${totalToDispatch}) تتجاوز الكمية المتاحة (${availableQuantity})`
         return
       }
-      
-      // Get all required data
-      const currentItemId = currentItem.id
-      const currentItemName = currentItem.name || currentItem.item_name || 'بدون اسم'
-      const currentItemCode = currentItem.code || currentItem.item_code || 'بدون كود'
-      const currentPerCarton = currentItem.per_carton_count || 12
-      const currentCartons = currentItem.cartons_count || 0
-      const currentSingles = currentItem.single_bottles_count || 0
-      
-      if (!currentItemId) {
-        error.value = 'معرف الصنف غير صالح. يرجى اختيار صنف مرة أخرى.'
-        return
-      }
-      
-      console.log('🚀 Preparing dispatch for item:', {
-        itemId: currentItemId,
-        itemName: currentItemName,
-        quantity: totalToDispatch,
-        available: availableQuantity,
-        perCarton: currentPerCarton,
-        currentCartons: currentCartons,
-        currentSingles: currentSingles
-      })
-
-      // Calculate detailed breakdown
-      const detailedDispatch = calculateDetailedDispatch(currentItem, totalToDispatch)
-      const { cartons: dispatchCartons, singles: dispatchSingles, perCarton: perCarton } = detailedDispatch
 
       loading.value = true
 
       try {
-        // Prepare dispatch data for store
+        // ✅ ONLY total quantity is sent – no breakdown fields!
+        // ✅ Also include item_name and item_code for transaction records
         const dispatchData = {
-          // Required identification
-          item_id: currentItemId,
+          item_id: currentItem.id,
           from_warehouse_id: form.sourceWarehouse,
           destination: 'dispatch',
           destination_id: form.destinationBranch,
-          
-          // Quantity fields
           quantity: totalToDispatch,
-          cartons_count: dispatchCartons,
-          per_carton_count: perCarton,
-          single_bottles_count: dispatchSingles,
-          
-          // Item information
-          item_name: currentItemName,
-          item_code: currentItemCode,
-          color: currentItem.color || '',
-          
-          // Warehouse information
-          from_warehouse_name: getWarehouseName(form.sourceWarehouse),
-          
-          // Optional info
           notes: form.notes || `صرف إلى ${getDestinationName(form.destinationBranch)}`,
           priority: form.priority,
-          supplier: currentItem.supplier || '',
-          item_location: currentItem.item_location || currentItem.location || ''
+          // Add item details for transaction display
+          item_name: currentItem.name || currentItem.item_name || 'غير محدد',
+          item_code: currentItem.code || currentItem.item_code || '',
+          color: currentItem.color || '' // optional, helps with display
         }
-        
+
         console.log('📤 Sending to store dispatchItem with payload:', dispatchData)
 
-        // Call store dispatch
         const result = await store.dispatch('dispatchItem', dispatchData)
 
-        console.log('📥 Store dispatch result:', result)
-
         if (result?.success) {
-          // Calculate new quantity
+          // ✅ Update local UI to reflect new stock
           const newQuantity = availableQuantity - totalToDispatch
-          
-          // Update UI state
-          try {
-            // Update search results
-            const updatedSearchResults = [...searchResults.value]
-            const itemIndex = updatedSearchResults.findIndex(item => item.id === currentItemId)
-            if (itemIndex !== -1) {
-              updatedSearchResults[itemIndex] = {
-                ...updatedSearchResults[itemIndex],
-                remaining_quantity: newQuantity,
-                cartons_count: Math.max(0, currentCartons - dispatchCartons),
-                single_bottles_count: Math.max(0, currentSingles - dispatchSingles)
-              }
-              searchResults.value = updatedSearchResults
-            }
-            
-            // Update selected item
-            if (selectedItem.value?.id === currentItemId) {
-              selectedItem.value = {
-                ...selectedItem.value,
-                remaining_quantity: newQuantity,
-                cartons_count: Math.max(0, currentCartons - dispatchCartons),
-                single_bottles_count: Math.max(0, currentSingles - dispatchSingles)
-              }
-            }
-          } catch (stateError) {
-            console.warn('⚠️ UI state update skipped:', stateError)
-          }
-          
-          successMessage.value = `تم صرف ${totalToDispatch} وحدة بنجاح`
-          if (dispatchCartons > 0 || dispatchSingles > 0) {
-            successMessage.value += ` (${dispatchCartons} كرتون × ${perCarton} + ${dispatchSingles} فردي)`
-          }
-          
-          // Create complete result for emit
-          const completeResult = {
-            // From store result
-            success: true,
-            message: result.message || 'تم الصرف بنجاح',
-            transactionId: result.transactionId,
-            newQuantity: result.newQuantity || newQuantity,
-            
-            // Guaranteed item identification
-            item_id: currentItemId,
-            id: currentItemId,
-            item_name: currentItemName,
-            item_code: currentItemCode,
-            
-            // Dispatch info
-            quantity: totalToDispatch,
-            from_warehouse_id: form.sourceWarehouse,
-            destination: form.destinationBranch,
-            destination_name: getDestinationName(form.destinationBranch),
-            
-            // Store's detailedUpdate if available
-            ...(result.detailedUpdate && { detailedUpdate: result.detailedUpdate })
-          }
-          
-          console.log('✅ COMPLETE result for emit:', completeResult)
 
-          // Reset and close
-          resetForm()
-          
-          setTimeout(() => {
-            console.log('🚀 FINAL: Emitting success with item_id:', completeResult.item_id)
-            emit('success', completeResult)
-            emit('close')
-          }, 1500)
-          
+          // Update search results
+          const updatedSearchResults = [...searchResults.value]
+          const itemIndex = updatedSearchResults.findIndex(item => item.id === currentItem.id)
+          if (itemIndex !== -1) {
+            updatedSearchResults[itemIndex] = {
+              ...updatedSearchResults[itemIndex],
+              remaining_quantity: newQuantity
+              // cartons_count and single_bottles_count will be recalculated by store
+            }
+            searchResults.value = updatedSearchResults
+          }
+
+          // ✅ Clear selected item and destination for next dispatch
+          selectedItem.value = null
+          form.destinationBranch = ''
+          form.quantity = 1
+          form.notes = ''
+          form.priority = 'normal'
+
+          successMessage.value = `✅ تم صرف ${totalToDispatch} وحدة بنجاح`
+
+          // ✅ Emit success for parent to refresh data, but keep modal open
+          emit('success', {
+            success: true,
+            item_id: currentItem.id,
+            item_name: currentItem.name || currentItem.item_name,
+            quantity: totalToDispatch,
+            transactionId: result.transactionId
+          })
+
         } else {
-          // Handle store errors
-          const errorMessage = result?.message || result?.error || 'فشل في عملية الصرف'
-          throw new Error(`${errorMessage} - الصنف: ${currentItemName} (${currentItemId})`)
+          throw new Error(result?.message || result?.error || 'فشل في عملية الصرف')
         }
-        
+
       } catch (err) {
-        console.error('❌ Dispatch error details:', err)
-        
-        // User-friendly error messages
-        if (err.message.includes('تتجاوز')) {
-          error.value = err.message
-        } else if (err.message.includes('ليس لديك صلاحية')) {
-          error.value = 'ليس لديك صلاحية للصرف من هذا المخزن'
-        } else if (err.message.includes('الصنف ليس في المخزن')) {
-          error.value = 'الصنف لم يعد موجوداً في المخزن المحدد'
-        } else if (err.message.includes('يجب إدخال كمية صحيحة')) {
-          error.value = 'يجب إدخال كمية صحيحة للصرف (أكبر من صفر)'
-        } else {
-          error.value = `خطأ: ${err.message.split('-')[0] || err.message}`
-        }
-        
-        // Refresh data
-        if (form.sourceWarehouse) {
-          setTimeout(() => {
-            loadInitialWarehouseItems()
-          }, 500)
-        }
+        console.error('❌ Dispatch error:', err)
+        error.value = `خطأ: ${err.message}`
       } finally {
         loading.value = false
       }
