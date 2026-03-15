@@ -79,11 +79,11 @@ const inventoryRoutes = {
   }
 };
 
-// ✅ UPDATED: نظام الفواتير المتكامل (الجديد)
+// نظام الفواتير المتكامل
 const invoiceSystemRoutes = {
   path: '/invoice-system',
   name: 'InvoiceSystem',
-  component: lazyLoad('InvoiceSystem'), // now points to InvoiceSystem.vue
+  component: lazyLoad('InvoiceSystem'),
   meta: { 
     requiresAuth: true,
     allowedRoles: ['superadmin', 'company_manager', 'warehouse_manager'],
@@ -93,11 +93,11 @@ const invoiceSystemRoutes = {
   }
 };
 
-// ✅ UPDATED: مسارات الفواتير (الآن تستخدم InvoiceSystem كأساس)
+// مسارات الفواتير
 const invoicesRoutes = {
   path: '/invoices',
   name: 'Invoices',
-  component: lazyLoad('InvoiceSystem'), // changed from 'Dispatch' to 'InvoiceSystem'
+  component: lazyLoad('InvoiceSystem'),
   meta: { 
     requiresAuth: true,
     allowedRoles: ['superadmin', 'company_manager', 'warehouse_manager'],
@@ -108,7 +108,7 @@ const invoicesRoutes = {
     {
       path: 'create',
       name: 'CreateInvoice',
-      component: lazyLoad('CreateInvoice'), // keep as is (placeholder)
+      component: lazyLoad('CreateInvoice'),
       meta: { 
         requiresAuth: true,
         allowedRoles: ['superadmin', 'company_manager', 'warehouse_manager'],
@@ -118,7 +118,7 @@ const invoicesRoutes = {
     {
       path: ':id',
       name: 'InvoiceDetails',
-      component: lazyLoad('InvoiceDetails'), // keep as is (placeholder)
+      component: lazyLoad('InvoiceDetails'),
       meta: { 
         requiresAuth: true,
         allowedRoles: ['superadmin', 'company_manager', 'warehouse_manager'],
@@ -130,6 +130,16 @@ const invoicesRoutes = {
 
 // جميع المسارات
 const routes = [
+  // 🔹 NEW: Home page (public)
+  {
+    path: '/',
+    name: 'Home',
+    component: lazyLoad('Home'),
+    meta: { 
+      requiresGuest: true,
+      layout: 'empty'
+    }
+  },
   {
     path: '/login',
     name: 'Login',
@@ -139,7 +149,6 @@ const routes = [
       layout: 'empty'
     }
   },
-  // 🔹 NEW: Signup route
   {
     path: '/signup',
     name: 'SignUp',
@@ -149,8 +158,9 @@ const routes = [
       layout: 'empty'
     }
   },
+  // 🔹 Changed from '/' to '/dashboard'
   {
-    path: '/',
+    path: '/dashboard',
     name: 'Dashboard',
     component: lazyLoad('Dashboard'),
     meta: { 
@@ -229,7 +239,7 @@ const routes = [
   {
     path: '/dispatch',
     name: 'Dispatch',
-    component: lazyLoad('Dispatch'), // pure dispatch view (separate file)
+    component: lazyLoad('Dispatch'),
     meta: { 
       requiresAuth: true,
       allowedRoles: ['superadmin', 'warehouse_manager'],
@@ -331,7 +341,7 @@ const router = createRouter({
   }
 });
 
-// ✅ FIXED: دالة للتحقق من صلاحية الوصول للمسار
+// ✅ دالة للتحقق من صلاحية الوصول للمسار
 const canAccessRoute = (userRole, userPermissions, routeMeta) => {
   if (!routeMeta.allowedRoles) return true;
 
@@ -340,9 +350,7 @@ const canAccessRoute = (userRole, userPermissions, routeMeta) => {
     return false;
   }
 
-  // ✅ FIXED: Get default permissions if user has none
   if (routeMeta.requiredPermissions) {
-    // If user has no permissions, use store getters to get effective permissions
     const effectivePermissions = userPermissions && userPermissions.length > 0 
       ? userPermissions 
       : getDefaultPermissionsForRole(userRole);
@@ -360,7 +368,7 @@ const canAccessRoute = (userRole, userPermissions, routeMeta) => {
   return true;
 };
 
-// ✅ FIXED: Get default permissions for roles (matches store logic)
+// ✅ Get default permissions for roles
 const getDefaultPermissionsForRole = (role) => {
   const defaultPermissions = {
     superadmin: [
@@ -387,13 +395,12 @@ const getDefaultPermissionsForRole = (role) => {
   return defaultPermissions[role] || ['view_dashboard', 'view_items', 'view_transactions', 'view_profile'];
 };
 
-// ✅ FIXED: التحقق من صلاحية مدير المخزن
+// ✅ التحقق من صلاحية مدير المخزن
 const canWarehouseManagerAccess = (userProfile, routeName, routeMeta) => {
   if (userProfile?.role !== 'warehouse_manager') return true;
 
   const allowedWarehouses = userProfile?.allowed_warehouses || [];
 
-  // Warehouse managers can access inventory even with no warehouses
   if (routeName?.includes('Inventory') && allowedWarehouses.length === 0) {
     console.log(`⚠️ مدير المخزن ليس لديه مخازن مسموحة، لكن يمكنه الوصول: ${routeName}`);
     return true;
@@ -424,7 +431,7 @@ const canAccessRouteCached = (userRole, userPermissions, routeMeta, userProfile)
 // متغير لمنع تكرار التحقق
 let isCheckingRoute = false;
 
-// ✅ FIXED: حارس التنقل باستخدام store بشكل صحيح
+// ✅ حارس التنقل باستخدام store
 const setupRouterGuard = (store) => {
   router.beforeEach((to, from, next) => {
     if (isCheckingRoute) {
@@ -435,7 +442,6 @@ const setupRouterGuard = (store) => {
     isCheckingRoute = true;
 
     try {
-      // استخدام مخزن البيانات مباشرة
       const user = store?.state?.user;
       const userProfile = store?.state?.userProfile;
       const userRole = userProfile?.role || '';
@@ -449,11 +455,12 @@ const setupRouterGuard = (store) => {
         requiresAuth: to.meta.requiresAuth
       });
 
-      // التحقق من صفحات الزوار (تسجيل الدخول)
+      // التحقق من صفحات الزوار (تسجيل الدخول، الصفحة الرئيسية)
       if (to.meta.requiresGuest) {
         if (user) {
-          console.log('📱 المستخدم مسجل دخول بالفعل - إعادة التوجيه');
-          next('/');
+          console.log('📱 المستخدم مسجل دخول بالفعل - إعادة التوجيه إلى لوحة التحكم');
+          // 🔹 Redirect to dashboard instead of root
+          next('/dashboard');
         } else {
           next();
         }
@@ -468,10 +475,8 @@ const setupRouterGuard = (store) => {
           return;
         }
 
-        // Check if user profile is loaded
         if (!userProfile) {
           console.log('⏳ جاري تحميل بيانات المستخدم...');
-          // Give time for user profile to load
           setTimeout(() => {
             isCheckingRoute = false;
             router.replace(to.path);
@@ -479,7 +484,6 @@ const setupRouterGuard = (store) => {
           return;
         }
 
-        // Check if user is active
         if (userProfile.is_active === false) {
           console.log('⛔ الحساب غير نشط');
           store.dispatch('logout');
@@ -487,7 +491,6 @@ const setupRouterGuard = (store) => {
           return;
         }
 
-        // Check if user has a role
         if (!userRole) {
           console.log('❌ المستخدم ليس لديه دور محدد');
           store.dispatch('showNotification', {
@@ -498,14 +501,12 @@ const setupRouterGuard = (store) => {
           return;
         }
 
-        // ✅ FIXED: Check route access with proper permission handling
         if (!canAccessRouteCached(userRole, userPermissions, to.meta, userProfile)) {
           console.log('⛔ المستخدم ليس لديه صلاحية الوصول');
           next('/unauthorized');
           return;
         }
 
-        // Check warehouse manager access
         if (!canWarehouseManagerAccess(userProfile, to.name, to.meta)) {
           console.log('⛔ مدير المخزن ليس لديه صلاحية الوصول');
           next('/unauthorized');
@@ -516,7 +517,6 @@ const setupRouterGuard = (store) => {
       next();
     } catch (error) {
       console.error('❌ خطأ في حارس التنقل:', error);
-      // On error, allow navigation to prevent blocking
       next();
     } finally {
       setTimeout(() => {
@@ -672,7 +672,8 @@ router.addRoute({
 // تحديث عنوان الصفحة
 router.afterEach((to) => {
   const pageTitles = {
-    '/': 'لوحة التحكم',
+    '/': 'الرئيسية',
+    '/dashboard': 'لوحة التحكم',
     '/inventory': 'المخزون',
     '/inventory/add': 'إضافة صنف',
     '/warehouses': 'إدارة المخازن',
@@ -696,16 +697,13 @@ router.afterEach((to) => {
 // تهيئة الموجه
 router.isReady().then(() => {
   console.log('✅ الموجه جاهز للتشغيل');
-  
   console.log('📋 المسارات المسجلة:');
   router.getRoutes().forEach(route => {
     console.log(`- ${route.name || 'غير معروف'}: ${route.path} ${route.meta?.requiresAuth ? '(تتطلب تسجيل دخول)' : ''}`);
   });
-  
 }).catch(error => {
   console.error('❌ خطأ في تحميل الموجه:', error);
 });
 
-// ✅ FIXED: تصدير setuptRouterGuard بدلاً من store مباشرة
 export { setupRouterGuard };
 export default router;

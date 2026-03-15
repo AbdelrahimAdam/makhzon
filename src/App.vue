@@ -211,7 +211,6 @@
     </div>
   </div>
 </template>
-
 <script>
 import { ref, computed, onMounted, watch, onUnmounted } from 'vue';
 import { useStore } from 'vuex';
@@ -259,8 +258,9 @@ export default {
     
     const profileLoaded = computed(() => userProfile.value !== null);
 
+    // 🔹 Added 'Home' to public routes
     const isPublicRoute = computed(() => {
-      const publicRoutes = ['Login', 'SignUp', 'Unauthorized', 'NotFound', 'ForgotPassword', 'ResetPassword'];
+      const publicRoutes = ['Login', 'SignUp', 'Home', 'Unauthorized', 'NotFound', 'ForgotPassword', 'ResetPassword'];
       return publicRoutes.includes(route.name);
     });
 
