@@ -12,6 +12,16 @@
       v{{ appVersion }}
     </div>
 
+    <!-- Back to Home Link (visible on mobile & desktop) -->
+    <div class="absolute top-4 right-4">
+      <router-link to="/" class="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm transition-all">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+        </svg>
+        <span>العودة إلى الرئيسية</span>
+      </router-link>
+    </div>
+
     <!-- Login Card -->
     <div class="w-full max-w-sm bg-white rounded-xl shadow-lg">
       <!-- Header -->
@@ -176,7 +186,7 @@
           </button>
         </div>
 
-        <!-- 🔹 NEW: Sign up link -->
+        <!-- Sign up link -->
         <div class="mt-4 text-center">
           <p class="text-xs text-gray-600">
             ليس لديك حساب؟
@@ -318,9 +328,9 @@ export default {
         
         console.log('Login successful, redirecting to dashboard...');
         
-        // Redirect to home page
+        // Redirect to dashboard (now /dashboard)
         setTimeout(() => {
-          router.push('/');
+          router.push('/dashboard');
         }, 100);
         
       } catch (err) {

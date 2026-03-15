@@ -1,5 +1,15 @@
 <template>
   <div class="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+    <!-- Back to Home Link -->
+    <div class="absolute top-4 right-4">
+      <router-link to="/" class="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm transition-all">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+        </svg>
+        <span>العودة إلى الرئيسية</span>
+      </router-link>
+    </div>
+
     <div class="sm:mx-auto sm:w-full sm:max-w-md">
       <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
         إنشاء حساب جديد
@@ -244,7 +254,7 @@ export default {
         errorMessage.value = 'يجب الموافقة على الشروط والأحكام';
         isValid = false;
       } else {
-        errorMessage.value = ''; // clear if previously set
+        errorMessage.value = '';
       }
 
       return isValid;
@@ -283,7 +293,6 @@ export default {
           console.log('✅ Company document created');
         } catch (companyError) {
           console.error('❌ Failed to create company:', companyError);
-          // If company creation fails, delete the Auth user to keep state clean
           await user.delete();
           throw new Error('فشل في إنشاء بيانات الشركة: ' + (companyError.message || 'خطأ غير معروف'));
         }
@@ -294,7 +303,7 @@ export default {
           await setDoc(userRef, {
             name: form.displayName.trim() || form.email.split('@')[0],
             email: form.email.trim().toLowerCase(),
-            role: 'superadmin', // 🔹 Company superadmin (full control within company)
+            role: 'superadmin',
             companyId: user.uid,
             allowed_warehouses: [],
             is_active: true,
@@ -304,25 +313,22 @@ export default {
           console.log('✅ User profile document created');
         } catch (userError) {
           console.error('❌ Failed to create user profile:', userError);
-          // Clean up company and auth user
-          await setDoc(doc(db, 'companies', user.uid), {}).catch(() => {}); // attempt delete
+          await setDoc(doc(db, 'companies', user.uid), {}).catch(() => {});
           await user.delete();
           throw new Error('فشل في إنشاء ملف المستخدم: ' + (userError.message || 'خطأ غير معروف'));
         }
 
-        // Show success notification
         store.dispatch('showNotification', {
           type: 'success',
           message: 'تم إنشاء الحساب بنجاح! جاري تحميل البيانات...'
         });
 
-        // Redirect to dashboard
-        router.push('/');
+        // 🔹 Redirect to dashboard (instead of root)
+        router.push('/dashboard');
 
       } catch (error) {
         console.error('Sign-up error:', error);
         
-        // Handle specific Firebase errors
         if (error.code === 'auth/email-already-in-use') {
           errorMessage.value = 'البريد الإلكتروني مستخدم بالفعل';
         } else if (error.code === 'auth/weak-password') {
