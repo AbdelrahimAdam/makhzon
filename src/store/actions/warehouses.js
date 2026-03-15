@@ -1,14 +1,21 @@
 import { db } from '@/firebase/config';
-import { collection, query, where, orderBy, getDocs, addDoc, updateDoc, deleteDoc, doc, limit, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, updateDoc, deleteDoc, doc, limit, serverTimestamp, setDoc, getDoc } from 'firebase/firestore';
 import { ensureFirebaseReady } from '../utils/firebase-utils';
 
 export default {
-  async loadWarehousesEnhanced({ commit, dispatch }) {
+  async loadWarehousesEnhanced({ commit, dispatch, rootState }) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     try {
       console.log('🔄 Loading warehouses with enhanced filtering...');
 
       const warehousesRef = collection(db, 'warehouses');
-      const q = query(warehousesRef, orderBy('name_ar'));
+      const q = query(
+        warehousesRef,
+        where('companyId', '==', companyId),
+        orderBy('name_ar')
+      );
       const snapshot = await getDocs(q);
 
       const warehouses = snapshot.docs
@@ -35,7 +42,10 @@ export default {
     }
   },
 
-  async getDispatchWarehouses({ dispatch }) {
+  async getDispatchWarehouses({ dispatch, rootState }) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العتلقى على معرف الشركة');
+
     try {
       console.log('🔄 Fetching dispatch warehouses from database...');
       
@@ -60,6 +70,7 @@ export default {
       const warehousesRef = collection(db, 'warehouses');
       const q = query(
         warehousesRef,
+        where('companyId', '==', companyId),
         where('type', '==', 'dispatch'),
         orderBy('name_ar')
       );
@@ -105,32 +116,10 @@ export default {
 
       console.log(`✅ Dispatch warehouses loaded from database: ${dispatchWarehouses.length}`);
       
-      if (dispatchWarehouses.length > 0) {
-        console.log('🎯 Final dispatch warehouses list:', 
-          dispatchWarehouses.map(w => ({ 
-            id: w.id, 
-            name_ar: w.name_ar,
-            name: w.name,
-            type: w.type,
-            is_active: w.is_active
-          }))
-        );
-      } else {
+      if (dispatchWarehouses.length === 0) {
         console.warn('⚠️ No dispatch warehouses found in database with type="dispatch"');
-        
-        const allWarehousesRef = collection(db, 'warehouses');
-        const allSnapshot = await getDocs(query(allWarehousesRef, limit(10)));
-        
-        const allWarehouses = allSnapshot.docs.map(doc => ({
-          id: doc.id,
-          name_ar: doc.data().name_ar,
-          name: doc.data().name,
-          type: doc.data().type || 'not specified'
-        }));
-        
-        console.log('📊 First 10 warehouses in database (all types):', allWarehouses);
       }
-      
+
       return dispatchWarehouses;
 
     } catch (error) {
@@ -146,12 +135,19 @@ export default {
     }
   },
 
-  async loadWarehouses({ dispatch }) {
+  async loadWarehouses({ dispatch, rootState }) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     try {
       console.log('🔄 Loading warehouses...');
 
       const warehousesRef = collection(db, 'warehouses');
-      const q = query(warehousesRef, orderBy('name_ar'));
+      const q = query(
+        warehousesRef,
+        where('companyId', '==', companyId),
+        orderBy('name_ar')
+      );
       const snapshot = await getDocs(q);
 
       const warehouses = snapshot.docs.map(doc => ({
@@ -171,7 +167,10 @@ export default {
     }
   },
 
-  async addWarehouse({ commit, state, dispatch }, warehouseData) {
+  async addWarehouse({ commit, state, dispatch, rootState }, warehouseData) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     try {
       if (state.userProfile?.role !== 'superadmin') {
         throw new Error('ليس لديك صلاحية لإضافة مخازن');
@@ -183,13 +182,16 @@ export default {
         is_active: true,
         created_at: serverTimestamp(),
         updated_at: serverTimestamp(),
-        created_by: state.userProfile?.name || state.user?.email
+        created_by: state.userProfile?.name || state.user?.email,
+        companyId: companyId
       };
 
-      const docRef = await addDoc(collection(db, 'warehouses'), warehouseToAdd);
+      // Use setDoc with the user‑provided ID
+      const warehouseRef = doc(db, 'warehouses', warehouseData.id);
+      await setDoc(warehouseRef, warehouseToAdd);
 
       const newWarehouse = {
-        id: docRef.id,
+        id: warehouseData.id,
         ...warehouseToAdd
       };
 
@@ -203,9 +205,16 @@ export default {
       return newWarehouse;
     } catch (error) {
       console.error('❌ Error adding warehouse:', error);
+      
+      // Provide a user‑friendly message if the error is permission‑denied
+      let errorMessage = error.message;
+      if (error.code === 'permission-denied') {
+        errorMessage = 'لا يمكنك إضافة هذا المخزن. قد يكون المعرف مستخدماً بالفعل في شركة أخرى.';
+      }
+      
       dispatch('showNotification', {
         type: 'error',
-        message: error.message || 'خطأ في إضافة المخزن'
+        message: errorMessage || 'خطأ في إضافة المخزن'
       });
       throw error;
     } finally {
@@ -213,7 +222,10 @@ export default {
     }
   },
 
-  async updateWarehouse({ commit, state, dispatch }, { warehouseId, warehouseData }) {
+  async updateWarehouse({ commit, state, dispatch, rootState }, { warehouseId, warehouseData }) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     try {
       if (state.userProfile?.role !== 'superadmin') {
         throw new Error('ليس لديك صلاحية لتعديل المخازن');
@@ -221,6 +233,12 @@ export default {
       commit('SET_OPERATION_LOADING', true);
 
       const warehouseRef = doc(db, 'warehouses', warehouseId);
+      
+      // Verify warehouse belongs to company
+      const warehouseDoc = await getDoc(warehouseRef);
+      if (!warehouseDoc.exists()) throw new Error('المخزن غير موجود');
+      if (warehouseDoc.data().companyId !== companyId) throw new Error('لا يمكنك تعديل هذا المخزن');
+
       await updateDoc(warehouseRef, {
         ...warehouseData,
         updated_at: serverTimestamp(),
@@ -250,12 +268,22 @@ export default {
     }
   },
 
-  async deleteWarehouse({ commit, state, dispatch }, { warehouseId, warehouseName }) {
+  async deleteWarehouse({ commit, state, dispatch, rootState }, { warehouseId, warehouseName }) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     try {
       if (state.userProfile?.role !== 'superadmin') {
         throw new Error('ليس لديك صلاحية لحذف المخازن');
       }
       commit('SET_OPERATION_LOADING', true);
+
+      const warehouseRef = doc(db, 'warehouses', warehouseId);
+      
+      // Verify warehouse belongs to company
+      const warehouseDoc = await getDoc(warehouseRef);
+      if (!warehouseDoc.exists()) throw new Error('المخزن غير موجود');
+      if (warehouseDoc.data().companyId !== companyId) throw new Error('لا يمكنك حذف هذا المخزن');
 
       const confirmDelete = confirm(`هل أنت متأكد من حذف المخزن "${warehouseName}"؟`);
       if (!confirmDelete) return;
@@ -268,7 +296,6 @@ export default {
         throw new Error('لا يمكن حذف المخزن لأنه يحتوي على أصناف. يجب نقل الأصناف أولاً.');
       }
 
-      const warehouseRef = doc(db, 'warehouses', warehouseId);
       await deleteDoc(warehouseRef);
 
       const updatedWarehouses = state.warehouses.filter(w => w.id !== warehouseId);

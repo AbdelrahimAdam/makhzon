@@ -72,7 +72,7 @@
 
     <!-- Main app content -->
     <div v-else class="h-screen flex flex-col">
-      <!-- Check if current route is public (login, unauthorized, notfound) -->
+      <!-- Check if current route is public (login, signup, unauthorized, notfound) -->
       <template v-if="isPublicRoute || isMobileRoute">
         <!-- Public pages - show only router view -->
         <div class="flex-1 overflow-y-auto">
@@ -82,8 +82,16 @@
 
       <!-- Authenticated layout -->
       <template v-else>
-        <!-- Check if user has dashboard access -->
-        <template v-if="hasDashboardAccess">
+        <!-- 🔹 Loading profile state while waiting for userProfile -->
+        <div v-if="isAuthenticated && !profileLoaded" class="h-full flex items-center justify-center">
+          <div class="text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-200 border-t-blue-600 mb-4 mx-auto"></div>
+            <p class="text-gray-700 dark:text-gray-300">جاري تحميل بيانات المستخدم...</p>
+          </div>
+        </div>
+
+        <!-- 🔹 Dashboard access granted -->
+        <template v-else-if="isAuthenticated && hasDashboardAccess">
           <!-- Mobile Layout -->
           <div v-if="isMobile" class="lg:hidden h-full flex flex-col">
             <!-- Mobile Header -->
@@ -164,8 +172,8 @@
           </div>
         </template>
 
-        <!-- No Dashboard Access Message -->
-        <template v-else>
+        <!-- 🔹 No Dashboard Access Message (only after profile is loaded) -->
+        <template v-else-if="isAuthenticated && profileLoaded && !hasDashboardAccess">
           <div class="h-full flex items-center justify-center bg-gray-50 dark:bg-gray-900">
             <div class="text-center p-8">
               <div class="w-20 h-20 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -190,6 +198,15 @@
             </div>
           </div>
         </template>
+
+        <!-- 🔹 Fallback for any unmatched state (prevents white screen) -->
+        <div v-else class="h-full flex items-center justify-center">
+          <div class="text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-200 border-t-blue-600 mb-4 mx-auto"></div>
+            <p class="text-gray-700 dark:text-gray-300">جاري تحميل التطبيق...</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">الرجاء الانتظار</p>
+          </div>
+        </div>
       </template>
     </div>
   </div>
@@ -229,7 +246,7 @@ export default {
     const sidebarCollapsed = ref(false);
     const isMobile = ref(false);
     const preloadedItems = ref(0);
-    const preloadedTarget = ref(20); // Target to preload
+    const preloadedTarget = ref(20);
     const initialDataLoaded = ref(false);
     const showPreloadIndicator = ref(false);
     
@@ -239,11 +256,11 @@ export default {
     const userProfile = computed(() => store.state.userProfile);
     const userRole = computed(() => store.getters.userRole);
     const allowedWarehouses = computed(() => store.getters.allowedWarehouses);
-    const warehousesLoaded = computed(() => store.state.warehousesLoaded);
     
-    // Computed properties
+    const profileLoaded = computed(() => userProfile.value !== null);
+
     const isPublicRoute = computed(() => {
-      const publicRoutes = ['Login', 'Unauthorized', 'NotFound', 'ForgotPassword', 'ResetPassword'];
+      const publicRoutes = ['Login', 'SignUp', 'Unauthorized', 'NotFound', 'ForgotPassword', 'ResetPassword'];
       return publicRoutes.includes(route.name);
     });
 
@@ -255,28 +272,19 @@ export default {
       return Math.min(100, Math.round((preloadedItems.value / preloadedTarget.value) * 100));
     });
 
-    // ✅ Check if user has dashboard access based on role and permissions
     const hasDashboardAccess = computed(() => {
-      if (!isAuthenticated.value) return false;
+      if (!isAuthenticated.value || !profileLoaded.value) return false;
       
       const role = userRole.value;
       const allowed = allowedWarehouses.value;
       
-      // Superadmin and company managers always have access
-      if (role === 'superadmin' || role === 'company_manager') {
-        return true;
-      }
-      
-      // Warehouse managers need to have at least one warehouse assigned
+      if (role === 'superadmin' || role === 'company_manager') return true;
       if (role === 'warehouse_manager') {
         return allowed && allowed.length > 0;
       }
-      
-      // Other roles (like view_only) might have limited access
       return ['superadmin', 'company_manager', 'warehouse_manager'].includes(role);
     });
 
-    // Methods
     const removeNotification = (notificationId) => {
       store.dispatch('removeNotification', notificationId);
     };
@@ -299,17 +307,14 @@ export default {
       }
     };
 
-    // ✅ CRITICAL: Preload essential data for instant display
     const preloadEssentialData = async () => {
       try {
         const { db } = await import('@/firebase/config');
         const { collection, query, orderBy, limit, getDocs, where } = await import('firebase/firestore');
         
-        // 1. Load warehouses using store action
         await store.dispatch('loadWarehouses');
         
-        // 2. If user is authenticated, preload minimal inventory
-        if (isAuthenticated.value && userProfile.value) {
+        if (isAuthenticated.value && profileLoaded.value) {
           let accessibleWarehouses = store.getters.accessibleWarehouses;
           
           if (accessibleWarehouses.length === 0) {
@@ -323,15 +328,13 @@ export default {
           let itemsQuery;
           
           if (warehouseIds.length > 0) {
-            // Preload from user's warehouses only
             itemsQuery = query(
               collection(db, 'items'),
-              where('warehouse_id', 'in', warehouseIds.slice(0, 10)), // Firestore limit: 10 values in 'in' array
+              where('warehouse_id', 'in', warehouseIds.slice(0, 10)),
               orderBy('updated_at', 'desc'),
-              limit(15) // Start with only 15 items for instant display
+              limit(15)
             );
           } else {
-            // Fallback: preload recent items
             itemsQuery = query(
               collection(db, 'items'),
               orderBy('updated_at', 'desc'),
@@ -345,104 +348,82 @@ export default {
             ...doc.data()
           }));
           
-          // Store preloaded items immediately
           store.commit('SET_INVENTORY', items);
           preloadedItems.value = items.length;
           
-          // Update progress indicator
           items.forEach((item, index) => {
             setTimeout(() => {
               preloadedItems.value = index + 1;
-            }, index * 50); // Stagger loading for visual effect
+            }, index * 50);
           });
           
-          // Mark initial data as loaded
           initialDataLoaded.value = true;
-          
-          // Show preload indicator briefly
           showPreloadIndicator.value = true;
           setTimeout(() => {
             showPreloadIndicator.value = false;
-          }, 2000); // Hide after 2 seconds
+          }, 2000);
           
-          // ✅ Start background loading of remaining data using store actions
           setTimeout(() => {
             loadRemainingDataInBackground();
           }, 1000);
+        } else {
+          initialDataLoaded.value = true;
         }
         
       } catch (error) {
         console.warn('Preload warning (non-critical):', error.message);
-        // Continue anyway - this is just preloading
         initialDataLoaded.value = true;
       }
     };
 
-    // ✅ Load remaining data in background using store actions
     const loadRemainingDataInBackground = async () => {
       try {
-        // 1. Load full inventory in background using store action
         store.dispatch('loadAllInventory', { forceRefresh: false });
-        
-        // 2. Load recent transactions using store action
         store.dispatch('fetchTransactions');
         
-        // 3. Load invoices if user has permission
         if (store.getters.canManageInvoices) {
           store.dispatch('loadAllInvoices');
         }
         
-        // 4. Load users if superadmin - Use loadUsers instead of loadAllUsers
         if (userRole.value === 'superadmin') {
           store.dispatch('loadUsers');
         }
         
-        // 5. Refresh dashboard counts - Use refreshDashboardCounts with warehouse parameter
         store.dispatch('refreshDashboardCounts', 'all');
-        
       } catch (error) {
         console.error('Background load error:', error);
-        // Silently fail - user already has data to work with
       }
     };
 
-    // ✅ Optimized initialization
     const initializeApp = async () => {
       try {
-        // Initialize auth using store action
         await store.dispatch('initializeAuth');
         
-        // If not authenticated, hide loading immediately
         if (!isAuthenticated.value) {
           initializing.value = false;
           return;
         }
         
-        // Start preloading immediately after auth
         const preloadPromise = preloadEssentialData();
         
-        // Wait for preload to complete (but don't block if it's slow)
         await Promise.race([
           preloadPromise,
-          new Promise(resolve => setTimeout(resolve, 2000)) // Max 2 seconds wait
+          new Promise(resolve => setTimeout(resolve, 2000))
         ]);
         
-        // Check if user has access to dashboard
-        if (!hasDashboardAccess.value) {
+        if (profileLoaded.value && !hasDashboardAccess.value) {
           console.warn('⚠️ User does not have dashboard access');
-          // Use store dispatch instead of commit for notification
           store.dispatch('showNotification', {
             type: 'warning',
             message: 'ليس لديك صلاحية للوصول إلى لوحة التحكم. يرجى التواصل مع المشرف.',
             duration: 5000
           });
-        } else {
-          // Show welcome notification only once
-          if (isAuthenticated.value && !localStorage.getItem('welcomeShown')) {
+        } else if (profileLoaded.value) {
+          if (!localStorage.getItem('welcomeShown')) {
             setTimeout(() => {
               store.dispatch('showNotification', {
                 type: 'success',
-                message: `مرحباً ${userProfile.value.name || userProfile.value.email}!`,
+                message: `مرحباً ${userProfile.value?.name || userProfile.value?.email || ''}!`,
                 duration: 3000
               });
               localStorage.setItem('welcomeShown', 'true');
@@ -450,10 +431,8 @@ export default {
           }
         }
         
-        // Initialize theme
         initializeTheme();
         
-        // Initialize sidebar state
         const savedState = localStorage.getItem('sidebarCollapsed');
         if (savedState !== null) {
           sidebarCollapsed.value = savedState === 'true';
@@ -461,22 +440,18 @@ export default {
 
       } catch (error) {
         console.error('App initialization error:', error);
-        
-        // Still show notification even if preload failed
         store.dispatch('showNotification', {
           type: 'error',
           message: 'حدث خطأ في تحميل بعض البيانات. يمكنك الاستمرار في العمل.',
           duration: 5000
         });
       } finally {
-        // Always hide loading screen after max 1.5 seconds
         setTimeout(() => {
           initializing.value = false;
-        }, 300); // Short delay for smoother transition
+        }, 300);
       }
     };
 
-    // ✅ Optimized theme initialization
     const initializeTheme = () => {
       const savedTheme = localStorage.getItem('theme');
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -487,7 +462,6 @@ export default {
         document.documentElement.classList.remove('dark');
       }
       
-      // Listen for theme changes
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
         if (!localStorage.getItem('theme')) {
           if (e.matches) {
@@ -500,22 +474,17 @@ export default {
     };
 
     onMounted(async () => {
-      // Check mobile first
       checkMobile();
       window.addEventListener('resize', checkMobile);
       
-      // Start initialization immediately
       initializeApp();
       
-      // Performance monitoring (dev only)
       if (process.env.NODE_ENV === 'development') {
         setTimeout(() => {
-          const performance = window.performance;
-          const timing = performance?.timing;
+          const perf = window.performance;
+          const timing = perf?.timing;
           if (timing) {
-            const loadTime = timing.loadEventEnd - timing.navigationStart;
-            const domReadyTime = timing.domContentLoadedEventEnd - timing.navigationStart;
-            console.log(`🚀 App loaded in ${loadTime}ms, DOM ready in ${domReadyTime}ms`);
+            console.log(`🚀 App loaded in ${timing.loadEventEnd - timing.navigationStart}ms, DOM ready in ${timing.domContentLoadedEventEnd - timing.navigationStart}ms`);
           }
         }, 1000);
       }
@@ -525,39 +494,27 @@ export default {
       window.removeEventListener('resize', checkMobile);
     });
 
-    // Close mobile menu when route changes
     watch(() => route.path, () => {
       mobileMenuOpen.value = false;
     });
 
-    // Watch for auth changes to trigger additional data loading
     watch(isAuthenticated, (authenticated) => {
       if (authenticated && !initialDataLoaded.value) {
-        // If user logs in after initial load, preload data
-        setTimeout(() => {
-          preloadEssentialData();
-        }, 100);
+        preloadEssentialData();
       }
     });
 
-    // Watch for user profile changes
     watch(userProfile, (profile) => {
       if (profile && isAuthenticated.value && !initialDataLoaded.value) {
-        // User profile loaded, preload data
-        setTimeout(() => {
-          preloadEssentialData();
-        }, 100);
+        preloadEssentialData();
       }
     });
 
-    // Check mobile on mount and resize
     const checkMobile = () => {
       isMobile.value = window.innerWidth < 1024;
     };
 
-    // Provide data to child components
     return {
-      // Refs
       initializing,
       mobileMenuOpen,
       sidebarCollapsed,
@@ -566,17 +523,13 @@ export default {
       preloadedTarget,
       initialDataLoaded,
       showPreloadIndicator,
-      
-      // Computed
       isAuthenticated,
       isPublicRoute,
       isMobileRoute,
       notifications,
       preloadedProgress,
       hasDashboardAccess,
-      userRole,
-      
-      // Methods
+      profileLoaded,
       removeNotification,
       toggleSidebar,
       toggleMobileMenu,

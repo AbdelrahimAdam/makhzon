@@ -171,6 +171,10 @@ export default {
   actions: {
     // ========== LOAD ALL INVOICES ==========
     async loadAllInvoices({ commit, state, rootState, dispatch }, { forceRefresh = false } = {}) {
+      // NEW: get companyId
+      const companyId = rootState.userProfile?.companyId;
+      if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
       if (state.invoicesLoading) {
         console.log('Invoice load already in progress');
         return state.invoices;
@@ -189,7 +193,13 @@ export default {
           throw new Error('ليس لديك صلاحية لعرض الفواتير');
         }
         const invoicesRef = collection(db, 'invoices');
-        const q = query(invoicesRef, orderBy('createdAt', 'desc'), limit(PERFORMANCE_CONFIG.INVOICE_LOAD_LIMIT));
+        // NEW: add companyId filter
+        const q = query(
+          invoicesRef,
+          where('companyId', '==', companyId),
+          orderBy('createdAt', 'desc'),
+          limit(PERFORMANCE_CONFIG.INVOICE_LOAD_LIMIT)
+        );
         const snapshot = await getDocs(q);
         console.log(`✅ Initial invoices loaded: ${snapshot.size} invoices`);
         const invoices = snapshot.docs.map(doc => {
@@ -215,6 +225,10 @@ export default {
 
     // ========== SEARCH INVOICES ==========
     async searchInvoices({ commit, rootState, dispatch }, searchParams) {
+      // NEW: get companyId
+      const companyId = rootState.userProfile?.companyId;
+      if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
       commit('SET_INVOICES_LOADING', true);
       commit('SET_INVOICES_ERROR', null);
       commit('RESET_INVOICE_PAGINATION');
@@ -228,9 +242,20 @@ export default {
         const invoicesRef = collection(db, 'invoices');
         let invoicesQuery;
         if (search && search.length >= 2) {
-          invoicesQuery = query(invoicesRef, orderBy('invoiceNumber'), limit(PERFORMANCE_CONFIG.SEARCH_LIMIT));
+          // NEW: add companyId filter
+          invoicesQuery = query(
+            invoicesRef,
+            where('companyId', '==', companyId),
+            orderBy('invoiceNumber'),
+            limit(PERFORMANCE_CONFIG.SEARCH_LIMIT)
+          );
         } else {
-          invoicesQuery = query(invoicesRef, orderBy('createdAt', 'desc'), limit(PERFORMANCE_CONFIG.INVOICE_LOAD_LIMIT));
+          invoicesQuery = query(
+            invoicesRef,
+            where('companyId', '==', companyId),
+            orderBy('createdAt', 'desc'),
+            limit(PERFORMANCE_CONFIG.INVOICE_LOAD_LIMIT)
+          );
         }
         const snapshot = await getDocs(invoicesQuery);
         console.log(`🔍 Invoice search found: ${snapshot.size} invoices`);
@@ -285,6 +310,10 @@ export default {
 
     // ========== CREATE INVOICE ==========
     async createInvoice({ commit, state, rootState, dispatch }, invoiceData) {
+      // NEW: get companyId
+      const companyId = rootState.userProfile?.companyId;
+      if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
       commit('SET_OPERATION_LOADING', true);
       commit('CLEAR_OPERATION_ERROR');
       try {
@@ -345,7 +374,8 @@ export default {
           date: Timestamp.now(),
           createdBy: rootState.userProfile?.name || rootState.user?.email || 'نظام',
           createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now()
+          updatedAt: Timestamp.now(),
+          companyId: companyId  // NEW
         };
 
         const docRef = await addDoc(collection(db, 'invoices'), cleanInvoiceData);
@@ -353,6 +383,7 @@ export default {
         for (const item of invoiceData.items) {
           if (item.id) {
             const itemRef = doc(db, 'items', item.id);
+            // Optionally verify item's companyId matches – but security rules will block if not.
             batch.update(itemRef, { remaining_quantity: increment(-(item.quantity || 0)) });
           }
         }
@@ -373,7 +404,8 @@ export default {
           user_id: rootState.user.uid,
           timestamp: Timestamp.now(),
           notes: `فاتورة مبيعات #${invoiceNumber} - ${invoiceData.customer.name}`,
-          created_by: rootState.userProfile?.name || rootState.user?.email || 'نظام'
+          created_by: rootState.userProfile?.name || rootState.user?.email || 'نظام',
+          companyId: companyId  // NEW (if transactions collection has companyId)
         };
         await addDoc(collection(db, 'transactions'), transactionData);
 
@@ -395,6 +427,10 @@ export default {
 
     // ========== UPDATE INVOICE ==========
     async updateInvoice({ commit, rootState, dispatch }, { invoiceId, invoiceData }) {
+      // NEW: get companyId
+      const companyId = rootState.userProfile?.companyId;
+      if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
       commit('SET_OPERATION_LOADING', true);
       commit('CLEAR_OPERATION_ERROR');
       try {
@@ -406,6 +442,12 @@ export default {
         const invoiceDoc = await getDoc(invoiceRef);
         if (!invoiceDoc.exists()) throw new Error('الفاتورة غير موجودة');
         const existingInvoice = invoiceDoc.data();
+
+        // NEW: verify companyId matches
+        if (existingInvoice.companyId !== companyId) {
+          throw new Error('لا يمكنك تعديل هذه الفاتورة');
+        }
+
         if (existingInvoice.status !== 'draft') throw new Error('لا يمكن تعديل فاتورة غير مسودة');
         if (!invoiceData.customer?.name?.trim() || !invoiceData.customer?.phone?.trim()) {
           throw new Error('جميع الحقول المطلوبة يجب أن تكون مملوءة (اسم العميل، الهاتف)');
@@ -477,7 +519,8 @@ export default {
           user_name: rootState.userProfile?.name || '',
           timestamp: serverTimestamp(),
           notes: `تحديث الفاتورة #${existingInvoice.invoiceNumber}`,
-          created_by: rootState.userProfile?.name || rootState.user?.email || 'نظام'
+          created_by: rootState.userProfile?.name || rootState.user?.email || 'نظام',
+          companyId: companyId  // NEW (if transactions collection has companyId)
         };
         await setDoc(transactionRef, transactionData);
 
@@ -498,6 +541,10 @@ export default {
 
     // ========== DELETE INVOICE ==========
     async deleteInvoice({ commit, rootState, dispatch }, invoiceId) {
+      // NEW: get companyId
+      const companyId = rootState.userProfile?.companyId;
+      if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
       commit('SET_OPERATION_LOADING', true);
       commit('CLEAR_OPERATION_ERROR');
       try {
@@ -509,6 +556,12 @@ export default {
         const invoiceDoc = await getDoc(invoiceRef);
         if (!invoiceDoc.exists()) throw new Error('الفاتورة غير موجودة');
         const existingInvoice = invoiceDoc.data();
+
+        // NEW: verify companyId matches
+        if (existingInvoice.companyId !== companyId) {
+          throw new Error('لا يمكنك حذف هذه الفاتورة');
+        }
+
         if (existingInvoice.status !== 'draft') throw new Error('لا يمكن حذف فاتورة غير مسودة');
         if (!confirm('هل أنت متأكد من حذف هذه الفاتورة؟')) return { success: false, message: 'تم إلغاء العملية' };
 
@@ -539,6 +592,10 @@ export default {
 
     // ========== UPDATE INVOICE STATUS ==========
     async updateInvoiceStatus({ commit, rootState, dispatch }, { invoiceId, status }) {
+      // NEW: get companyId
+      const companyId = rootState.userProfile?.companyId;
+      if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
       commit('SET_OPERATION_LOADING', true);
       commit('CLEAR_OPERATION_ERROR');
       try {
@@ -550,6 +607,12 @@ export default {
         const invoiceDoc = await getDoc(invoiceRef);
         if (!invoiceDoc.exists()) throw new Error('الفاتورة غير موجودة');
         const existingInvoice = invoiceDoc.data();
+
+        // NEW: verify companyId matches
+        if (existingInvoice.companyId !== companyId) {
+          throw new Error('لا يمكنك تغيير حالة هذه الفاتورة');
+        }
+
         await updateDoc(invoiceRef, { status, updatedAt: Timestamp.now() });
         const updatedInvoice = { id: invoiceId, ...existingInvoice, status };
         commit('UPDATE_INVOICE', updatedInvoice);
@@ -569,6 +632,10 @@ export default {
 
     // ========== GET INVOICE BY ID ==========
     async getInvoiceById({ rootState, dispatch }, invoiceId) {
+      // NEW: get companyId
+      const companyId = rootState.userProfile?.companyId;
+      if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
       try {
         if (!rootState.userProfile) throw new Error('يجب تسجيل الدخول أولاً');
         if (!['superadmin', 'warehouse_manager', 'company_manager'].includes(rootState.userProfile.role)) {
@@ -578,6 +645,12 @@ export default {
         const invoiceDoc = await getDoc(invoiceRef);
         if (!invoiceDoc.exists()) throw new Error('الفاتورة غير موجودة');
         const invoiceData = invoiceDoc.data();
+
+        // NEW: verify companyId matches
+        if (invoiceData.companyId !== companyId) {
+          throw new Error('لا يمكنك الوصول إلى هذه الفاتورة');
+        }
+
         return { id: invoiceDoc.id, ...invoiceData, date: invoiceData.date?.toDate?.() || invoiceData.date };
       } catch (error) {
         console.error('❌ Error getting invoice:', error);
@@ -593,6 +666,7 @@ export default {
         if (!['superadmin', 'company_manager'].includes(rootState.userProfile.role)) {
           throw new Error('ليس لديك صلاحية لتصدير الفواتير');
         }
+        // State invoices are already filtered by company, so no additional company check needed.
         let invoicesToExport = state.invoices;
         if (filters.search) {
           const searchLower = filters.search.toLowerCase();

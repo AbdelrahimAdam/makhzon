@@ -26,7 +26,7 @@
     "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
     "firebase": "^10.7.1",
-    "firebase-admin": "^13.6.0",
+    "firebase-admin": "^13.7.0",
     "html2pdf.js": "^0.10.1",
     "vue": "^3.3.0",
     "vue-loader": "^17.4.2",

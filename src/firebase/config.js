@@ -4,15 +4,17 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { getAnalytics } from 'firebase/analytics';
 
-// Firebase configuration
+// Firebase configuration (NEW PROJECT)
 export const firebaseConfig = {
-  apiKey: "AIzaSyDxpbXvFH6UvfE2I6OJ_wNFnA889Zu-NEQ",
-  authDomain: "monofia-inventory.firebaseapp.com",
-  projectId: "monofia-inventory",
-  storageBucket: "monofia-inventory.firebasestorage.app",
-  messagingSenderId: "788480597316",
-  appId: "1:788480597316:web:776a05277fb4e60806cb11"
+  apiKey: "AIzaSyC5MwMHnbPtntQf4pmux-RKuX3BI-Lpye4",
+  authDomain: "saas-inventory-a3fb8.firebaseapp.com",
+  projectId: "saas-inventory-a3fb8",
+  storageBucket: "saas-inventory-a3fb8.firebasestorage.app",
+  messagingSenderId: "567877590572",
+  appId: "1:567877590572:web:091691096444daacb7fb89",
+  measurementId: "G-NQVGW088SZ"
 };
 
 // Firebase services
@@ -20,17 +22,20 @@ let app = null;
 let auth = null;
 let db = null;
 let storage = null;
+let analytics = null;
+
 let isInitialized = false;
 let initializationPromise = null;
-let initializationError = null; // Add this back
+let initializationError = null;
 
 /**
  * Simple Firebase initialization WITHOUT offline persistence
  */
 export async function initializeFirebase() {
+
   if (isInitialized) {
     console.log('✅ Firebase already initialized');
-    return { app, auth, db, storage };
+    return { app, auth, db, storage, analytics };
   }
 
   if (initializationPromise) {
@@ -40,6 +45,7 @@ export async function initializeFirebase() {
 
   initializationPromise = (async () => {
     try {
+
       console.log('🔥 Initializing Firebase...');
 
       // Initialize Firebase app
@@ -51,85 +57,101 @@ export async function initializeFirebase() {
       db = getFirestore(app);
       storage = getStorage(app);
 
+      // Initialize analytics only in browser
+      if (typeof window !== "undefined") {
+        try {
+          analytics = getAnalytics(app);
+          console.log("📊 Firebase Analytics initialized");
+        } catch (e) {
+          console.warn("Analytics not supported:", e.message);
+        }
+      }
+
       // Set default language (Arabic)
       auth.languageCode = 'ar';
+
       console.log('✅ Firebase services initialized');
 
-      // IMPORTANT: Offline persistence is DISABLED to prevent DataCloneError
+      // IMPORTANT: Offline persistence is DISABLED
       console.log('⚠️ Offline persistence disabled to prevent IndexedDB errors');
 
-      // Mark as initialized
       isInitialized = true;
       initializationError = null;
-      
+
       console.log('🎉 Firebase fully initialized and ready');
-      
-      return { app, auth, db, storage };
-      
+
+      return { app, auth, db, storage, analytics };
+
     } catch (error) {
+
       console.error('❌ Firebase initialization failed:', error);
       initializationError = error;
       isInitialized = false;
       throw error;
+
     } finally {
       initializationPromise = null;
     }
+
   })();
 
   return initializationPromise;
 }
 
 /**
- * Clear IndexedDB cache (optional, for manual cleanup)
+ * Clear IndexedDB cache
  */
 export async function clearCorruptedIndexedDB() {
-  if (typeof window === 'undefined' || !window.indexedDB) {
-    return;
-  }
+
+  if (typeof window === 'undefined' || !window.indexedDB) return;
 
   try {
+
     console.log('🧹 Clearing IndexedDB cache...');
-    
-    // List of possible Firestore database names
+
     const dbNames = [
-      'firestore/[DEFAULT]/monofia-inventory/main',
-      'firestore/[DEFAULT]/monofia-inventory',
+      'firestore/[DEFAULT]/saas-inventory-a3fb8/main',
+      'firestore/[DEFAULT]/saas-inventory-a3fb8',
       'firestore',
       'firestore-v9'
     ];
 
     for (const dbName of dbNames) {
+
       try {
+
         const deleteReq = window.indexedDB.deleteDatabase(dbName);
+
         await new Promise((resolve, reject) => {
           deleteReq.onsuccess = resolve;
           deleteReq.onerror = reject;
-          deleteReq.onblocked = () => {
-            console.log(`Database ${dbName} is blocked, closing connections...`);
-            resolve();
-          };
+          deleteReq.onblocked = () => resolve();
         });
+
         console.log(`🧹 Cleared IndexedDB database: ${dbName}`);
-      } catch (e) {
-        // Ignore errors for non-existent databases
-      }
+
+      } catch (e) {}
+
     }
 
-    // Also clear localStorage cache
     try {
+
       const keys = Object.keys(localStorage);
+
       for (const key of keys) {
         if (key.includes('firestore') || key.includes('firebase')) {
           localStorage.removeItem(key);
         }
       }
+
       console.log('🧹 Cleared Firebase-related localStorage items');
-    } catch (e) {
-      // Ignore localStorage errors
-    }
-    
+
+    } catch (e) {}
+
   } catch (error) {
+
     console.warn('⚠️ Error clearing IndexedDB:', error.message);
+
   }
 }
 
@@ -137,20 +159,21 @@ export async function clearCorruptedIndexedDB() {
  * Emergency reset
  */
 export async function emergencyReset() {
+
   console.log('🚨 Performing emergency reset...');
-  
-  // Clear all Firebase data
+
   await clearCorruptedIndexedDB();
-  
-  // Reset variables
+
   app = null;
   auth = null;
   db = null;
   storage = null;
+  analytics = null;
+
   isInitialized = false;
   initializationPromise = null;
   initializationError = null;
-  
+
   console.log('✅ Emergency reset complete');
 }
 
@@ -158,18 +181,26 @@ export async function emergencyReset() {
  * Initialize with retry
  */
 export async function initializeWithRetry(maxRetries = 3) {
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+
     try {
+
       console.log(`🔄 Initialization attempt ${attempt}/${maxRetries}`);
       return await initializeFirebase();
+
     } catch (error) {
+
       console.error(`❌ Attempt ${attempt} failed:`, error.message);
-      if (attempt === maxRetries) {
-        throw error;
-      }
+
+      if (attempt === maxRetries) throw error;
+
       await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+
     }
+
   }
+
 }
 
 /**
@@ -183,11 +214,13 @@ export function isFirebaseInitialized() {
  * Get Firebase services
  */
 export function getFirebaseServices() {
+
   if (!isInitialized) {
     console.warn('⚠️ Firebase not initialized. Call initializeFirebase() first.');
     return null;
   }
-  return { app, auth, db, storage };
+
+  return { app, auth, db, storage, analytics };
 }
 
 /**
@@ -198,7 +231,7 @@ export function getInitializationError() {
 }
 
 /**
- * Check if persistence is enabled (always false in this version)
+ * Check persistence (always false)
  */
 export function isPersistenceEnabled() {
   return false;
@@ -208,39 +241,48 @@ export function isPersistenceEnabled() {
  * Reset Firebase
  */
 export function resetFirebase() {
+
   app = null;
   auth = null;
   db = null;
   storage = null;
+  analytics = null;
+
   isInitialized = false;
   initializationPromise = null;
   initializationError = null;
+
   console.log('🧹 Firebase reset');
+
 }
 
 /**
- * Initialize Firebase automatically (for backward compatibility)
+ * Auto initialize in production
  */
 try {
-  // Auto-initialize in production, but allow manual initialization in development
+
   if (process.env.NODE_ENV === 'production' && typeof window !== 'undefined') {
+
     initializeWithRetry(2).catch(error => {
-      console.warn('⚠️ Auto-initialization failed, Firebase will be initialized on demand:', error.message);
+      console.warn('⚠️ Auto-initialization failed:', error.message);
     });
+
   }
+
 } catch (error) {
+
   console.warn('⚠️ Auto-initialization setup failed:', error.message);
+
 }
 
-// Export services (will be null until initialized)
-export { app, auth, db, storage };
+// Export services
+export { app, auth, db, storage, analytics };
 
-// Export initialization status
+// Export status
 export const isFirebaseReady = isInitialized;
 
-// Re-export commonly used Firebase functions for convenience
-export { 
-  // Auth functions
+// Auth helpers
+export {
   signInWithEmailAndPassword,
   signOut,
   createUserWithEmailAndPassword,
@@ -249,8 +291,8 @@ export {
   onAuthStateChanged
 } from 'firebase/auth';
 
+// Firestore helpers
 export {
-  // Firestore functions
   collection,
   doc,
   getDoc,
@@ -273,15 +315,15 @@ export {
   Timestamp
 } from 'firebase/firestore';
 
-// Default export for backward compatibility
+// Default export
 export default {
-  // Services
+
   app,
   auth,
   db,
   storage,
-  
-  // Initialization functions
+  analytics,
+
   initializeFirebase,
   initializeWithRetry,
   isFirebaseInitialized,
@@ -290,11 +332,10 @@ export default {
   emergencyReset,
   getInitializationError,
   clearCorruptedIndexedDB,
-  
-  // Status
+
   isFirebaseReady,
   isPersistenceEnabled,
-  
-  // Config
+
   firebaseConfig
+
 };

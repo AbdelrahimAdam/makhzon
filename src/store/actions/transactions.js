@@ -4,11 +4,13 @@ import { ensureFirebaseReady } from '../utils/firebase-utils';
 import { PERFORMANCE_CONFIG, TRANSACTION_TYPES } from '../utils/constants';
 
 export default {
-  async fetchTransactions({ commit, dispatch }) {
+  async fetchTransactions({ commit, dispatch, rootState }) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     commit('SET_TRANSACTIONS_LOADING', true);
 
     try {
-      // Ensure Firebase is ready (optional but good practice)
       await ensureFirebaseReady();
 
       if (!auth.currentUser) {
@@ -18,6 +20,7 @@ export default {
 
       const transactionsQuery = query(
         collection(db, 'transactions'),
+        where('companyId', '==', companyId),   // NEW
         orderBy('timestamp', 'desc'),
         limit(100)
       );
@@ -43,7 +46,10 @@ export default {
     }
   },
 
-  async getRecentTransactions({ commit, dispatch }) {
+  async getRecentTransactions({ commit, dispatch, rootState }) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     try {
       await ensureFirebaseReady();
 
@@ -51,6 +57,7 @@ export default {
 
       const transactionsQuery = query(
         collection(db, 'transactions'),
+        where('companyId', '==', companyId),   // NEW
         where('timestamp', '>=', oneDayAgo),
         orderBy('timestamp', 'desc'),
         limit(30)
@@ -71,7 +78,10 @@ export default {
     }
   },
 
-  async loadMoreTransactions({ commit, state, dispatch }) {
+  async loadMoreTransactions({ commit, state, dispatch, rootState }) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     if (state.pagination.isFetching) {
       return [];
     }
@@ -83,7 +93,11 @@ export default {
       await ensureFirebaseReady();
 
       const transactionsRef = collection(db, 'transactions');
-      const allDocs = await getDocs(transactionsRef);
+      const q = query(
+        transactionsRef,
+        where('companyId', '==', companyId)   // NEW
+      );
+      const allDocs = await getDocs(q);
       
       const allTransactions = allDocs.docs.map(doc => ({
         id: doc.id,
@@ -136,7 +150,10 @@ export default {
     }
   },
 
-  async setupRealtimeTransactions({ commit, state }) {
+  async setupRealtimeTransactions({ commit, state, rootState }) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     if (state.realtimeListeners.length > 0) {
       console.log('⚠️ Real-time transactions already set up');
       return;
@@ -149,6 +166,7 @@ export default {
       const transactionsRef = collection(db, 'transactions');
       const q = query(
         transactionsRef,
+        where('companyId', '==', companyId),   // NEW
         orderBy('timestamp', 'desc'),
         limit(50)
       );

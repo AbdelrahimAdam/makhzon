@@ -9,7 +9,7 @@ import { ensureCompleteItemFields } from '../utils/helpers';
 const searchCache = new SearchCache();
 
 export default {
-  async searchInventorySpark({ commit, state, dispatch }, {
+  async searchInventorySpark({ commit, state, dispatch, rootState }, {
     searchQuery,
     warehouseId = null,
     limit = SPARK_CONFIG.MAX_RESULTS,
@@ -298,7 +298,10 @@ export default {
     return removeDuplicatesAndSortByRelevance(completeMatches, searchTerm, limit);
   },
 
-  async searchFirebaseSparkEnhanced({ state }, { query, warehouseId, limit }) {
+  async searchFirebaseSparkEnhanced({ state, rootState }, { query, warehouseId, limit }) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     try {
       console.log(`🌐 SPARK Firebase Enhanced search for: "${query}"`);
 
@@ -355,6 +358,7 @@ export default {
         if (warehouseId && warehouseId !== 'all') {
           itemsQuery = firestoreQuery(
             itemsRef,
+            where('companyId', '==', companyId),   // NEW
             where('warehouse_id', '==', warehouseId),
             orderBy('updated_at', 'desc'),
             firestoreLimit(Math.min((limit || SPARK_CONFIG.MAX_RESULTS) * 3, 150))
@@ -362,6 +366,7 @@ export default {
         } else {
           itemsQuery = firestoreQuery(
             itemsRef,
+            where('companyId', '==', companyId),   // NEW
             orderBy('updated_at', 'desc'),
             firestoreLimit(Math.min((limit || SPARK_CONFIG.MAX_RESULTS) * 3, 150))
           );
@@ -371,6 +376,7 @@ export default {
           if (allowedWarehouseIds.includes(warehouseId)) {
             itemsQuery = firestoreQuery(
               itemsRef,
+              where('companyId', '==', companyId),   // NEW
               where('warehouse_id', '==', warehouseId),
               orderBy('updated_at', 'desc'),
               firestoreLimit(Math.min((limit || SPARK_CONFIG.MAX_RESULTS) * 3, 150))
@@ -385,6 +391,7 @@ export default {
           if (validIds.length === 1) {
             itemsQuery = firestoreQuery(
               itemsRef,
+              where('companyId', '==', companyId),   // NEW
               where('warehouse_id', '==', validIds[0]),
               orderBy('updated_at', 'desc'),
               firestoreLimit(Math.min((limit || SPARK_CONFIG.MAX_RESULTS) * 3, 150))
@@ -393,6 +400,7 @@ export default {
             try {
               itemsQuery = firestoreQuery(
                 itemsRef,
+                where('companyId', '==', companyId),   // NEW
                 where('warehouse_id', 'in', validIds),
                 orderBy('updated_at', 'desc'),
                 firestoreLimit(Math.min((limit || SPARK_CONFIG.MAX_RESULTS) * 3, 120))
@@ -401,6 +409,7 @@ export default {
               console.warn('"in" query failed, using single warehouse:', inError);
               itemsQuery = firestoreQuery(
                 itemsRef,
+                where('companyId', '==', companyId),   // NEW
                 where('warehouse_id', '==', validIds[0]),
                 orderBy('updated_at', 'desc'),
                 firestoreLimit(Math.min((limit || SPARK_CONFIG.MAX_RESULTS) * 3, 150))

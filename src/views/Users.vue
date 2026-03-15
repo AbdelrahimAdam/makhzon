@@ -1138,8 +1138,8 @@ export default {
           case 'warehouse_manager':
             stats.warehouseManagers++
             break
-          case 'viewer':
-          case 'employee':
+          case 'user':
+          case 'viewer': // Handle legacy 'viewer' values
             stats.employees++
             break
         }
@@ -1425,8 +1425,8 @@ export default {
         'superadmin': 'مشرف عام',
         'company_manager': 'مدير شركة',
         'warehouse_manager': 'مدير مخزن',
-        'viewer': 'مشاهد',
-        'employee': 'موظف'
+        'user': 'مشاهد',
+        'viewer': 'مشاهد' // Legacy support
       }
       return roles[role] || role
     },
@@ -1436,8 +1436,8 @@ export default {
         'superadmin': 'fas fa-crown',
         'company_manager': 'fas fa-user-tie',
         'warehouse_manager': 'fas fa-warehouse',
-        'viewer': 'fas fa-eye',
-        'employee': 'fas fa-user'
+        'user': 'fas fa-eye',
+        'viewer': 'fas fa-eye' // Legacy support
       }
       return icons[role] || 'fas fa-user'
     },
@@ -1573,11 +1573,15 @@ export default {
     },
     
     editUser(user) {
+      // Map legacy role 'viewer' to 'user' for compatibility
+      let role = user.role
+      if (role === 'viewer') role = 'user'
+      
       this.editingUser = user
       this.userForm = {
         name: user.name,
         email: user.email,
-        role: user.role,
+        role: role,
         password: '',
         allowed_warehouses: user.allowed_warehouses || [],
         permissions: user.permissions || ['view_reports'],
@@ -1632,7 +1636,7 @@ export default {
         const userData = {
           name: this.userForm.name.trim(),
           email: this.userForm.email.trim(),
-          role: this.userForm.role,
+          role: this.userForm.role, // This will be one of the allowed roles
           allowed_warehouses: this.userForm.allowed_warehouses,
           permissions: this.userForm.permissions,
           notes: this.userForm.notes.trim(),
@@ -1670,34 +1674,39 @@ export default {
     async createUser(userData) {
       try {
         const { email, password, ...profileData } = userData
-        
+
+        // التحقق من وجود companyId للمستخدم الحالي
+        if (!this.userProfile || !this.userProfile.companyId) {
+          throw new Error('لم يتم العثور على معرف الشركة. يرجى تسجيل الدخول مرة أخرى.')
+        }
+
         // إنشاء المستخدم في Firebase Authentication
         const userCredential = await createUserWithEmailAndPassword(auth, email, password)
         const newUser = userCredential.user
-        
-        // إنشاء وثيقة المستخدم في Firestore
+
+        // إنشاء وثيقة المستخدم في Firestore مع companyId
         const userDocData = {
           ...profileData,
           email: email,
           uid: newUser.uid,
+          companyId: this.userProfile.companyId,
           created_at: serverTimestamp(),
           updated_at: serverTimestamp(),
           created_by: this.user?.uid
         }
-        
+
         await setDoc(doc(db, 'users', newUser.uid), userDocData)
-        
-        // إرسال إشعار
+
         this.showNotification({
           type: 'success',
           message: `تم إنشاء المستخدم ${profileData.name} بنجاح`
         })
-        
+
         return { success: true, userId: newUser.uid }
-        
+
       } catch (error) {
         console.error('Error creating user:', error)
-        
+
         let errorMessage = 'فشل في إنشاء المستخدم'
         if (error.code === 'auth/email-already-in-use') {
           errorMessage = 'البريد الإلكتروني مستخدم بالفعل'
@@ -1706,12 +1715,12 @@ export default {
         } else if (error.code === 'auth/weak-password') {
           errorMessage = 'كلمة المرور ضعيفة'
         }
-        
+
         this.showNotification({
           type: 'error',
           message: errorMessage
         })
-        
+
         throw new Error(errorMessage)
       }
     },
@@ -1729,7 +1738,6 @@ export default {
         
         await updateDoc(userRef, updateData)
         
-        // إرسال إشعار
         this.showNotification({
           type: 'success',
           message: 'تم تحديث بيانات المستخدم بنجاح'
@@ -1757,7 +1765,6 @@ export default {
         // حذف من Firestore
         await deleteDoc(doc(db, 'users', userId))
         
-        // إرسال إشعار
         this.showNotification({
           type: 'success',
           message: 'تم حذف المستخدم بنجاح'

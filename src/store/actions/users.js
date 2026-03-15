@@ -1,20 +1,38 @@
 import { db, auth } from '@/firebase/config';
-import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, query, where, orderBy, getDocs, limit, writeBatch } from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { serverTimestamp } from 'firebase/firestore'; // added import
 import { ensureFirebaseReady } from '../utils/firebase-utils';
 
 export default {
-  async loadUsers({ commit, state, dispatch }) {
+  async loadUsers({ commit, state, dispatch, rootState }) {
     try {
-      console.log('🔄 Loading all users...');
+      console.log('🔄 Loading users...');
 
-      if (state.userProfile?.role !== 'superadmin') {
-        console.log('⚠️ User is not superadmin, skipping users load');
+      const role = state.userProfile?.role;
+      const companyId = rootState.userProfile?.companyId;
+
+      if (role !== 'superadmin' && role !== 'company_manager') {
+        console.log('⚠️ User is not superadmin or company manager, skipping users load');
         return [];
       }
 
       const usersRef = collection(db, 'users');
-      const q = query(usersRef, orderBy('created_at', 'desc'));
+      let q;
+
+      if (role === 'superadmin') {
+        // Superadmin sees all users
+        q = query(usersRef, orderBy('created_at', 'desc'));
+      } else {
+        // Company manager sees only users of their company
+        if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+        q = query(
+          usersRef,
+          where('companyId', '==', companyId),
+          orderBy('created_at', 'desc')
+        );
+      }
+
       const snapshot = await getDocs(q);
 
       const users = snapshot.docs.map(doc => ({
@@ -28,19 +46,18 @@ export default {
 
     } catch (error) {
       console.error('❌ Error loading users:', error);
-
-      if (state.userProfile?.role === 'superadmin') {
-        dispatch('showNotification', {
-          type: 'error',
-          message: error.message || 'خطأ في تحميل المستخدمين'
-        });
-      }
-
+      dispatch('showNotification', {
+        type: 'error',
+        message: error.message || 'خطأ في تحميل المستخدمين'
+      });
       return [];
     }
   },
 
-  async createUser({ commit, state, dispatch }, userData) {
+  async createUser({ commit, state, dispatch, rootState }, userData) {
+    const creatorCompanyId = rootState.userProfile?.companyId;
+    if (!creatorCompanyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     commit('SET_OPERATION_LOADING', true);
     commit('CLEAR_OPERATION_ERROR');
 
@@ -54,8 +71,9 @@ export default {
         allWarehouses: userData.allWarehouses
       });
 
-      if (state.userProfile?.role !== 'superadmin') {
-        throw new Error('فقط المشرف العام يمكنه إنشاء مستخدمين');
+      const creatorRole = state.userProfile?.role;
+      if (creatorRole !== 'superadmin' && creatorRole !== 'company_manager') {
+        throw new Error('ليس لديك صلاحية لإنشاء مستخدمين');
       }
 
       if (!userData.name?.trim() || !userData.email?.trim() || !userData.role) {
@@ -131,7 +149,8 @@ export default {
         created_by: state.user.uid,
         created_by_name: state.userProfile?.name || state.user?.email,
         last_login: null,
-        login_count: 0
+        login_count: 0,
+        companyId: creatorCompanyId   // NEW – user belongs to creator's company
       };
 
       console.log('💾 Saving user to Firestore...');
@@ -148,7 +167,10 @@ export default {
         created_at: new Date().toISOString()
       };
 
-      commit('SET_ALL_USERS', [...state.allUsers, newUser]);
+      // Update local state if the new user belongs to the current company (or always for superadmin)
+      if (creatorRole === 'superadmin' || creatorCompanyId === userDoc.companyId) {
+        commit('SET_ALL_USERS', [...state.allUsers, newUser]);
+      }
 
       const warehouseText = userData.allWarehouses ? 
         'جميع المخازن' : 
@@ -198,7 +220,10 @@ export default {
     }
   },
 
-  async updateUser({ commit, state, dispatch }, { userId, userData }) {
+  async updateUser({ commit, state, dispatch, rootState }, { userId, userData }) {
+    const companyId = rootState.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     commit('SET_OPERATION_LOADING', true);
     commit('CLEAR_OPERATION_ERROR');
 
@@ -210,8 +235,9 @@ export default {
         permissions: userData.permissions?.length || 0
       });
 
-      if (state.userProfile?.role !== 'superadmin') {
-        throw new Error('فقط المشرف العام يمكنه تعديل المستخدمين');
+      const role = state.userProfile?.role;
+      if (role !== 'superadmin' && role !== 'company_manager') {
+        throw new Error('ليس لديك صلاحية لتعديل المستخدمين');
       }
 
       const userRef = doc(db, 'users', userId);
@@ -222,6 +248,11 @@ export default {
       }
 
       const existingUser = userDoc.data();
+
+      // If user is company manager, ensure the target user belongs to same company
+      if (role === 'company_manager' && existingUser.companyId !== companyId) {
+        throw new Error('لا يمكنك تعديل هذا المستخدم');
+      }
 
       const updateData = {
         updated_at: serverTimestamp(),
@@ -259,11 +290,14 @@ export default {
       await updateDoc(userRef, updateData);
 
       const updatedUser = { ...existingUser, ...updateData, id: userId };
-      const updatedUsers = state.allUsers.map(user => 
-        user.id === userId ? updatedUser : user
-      );
       
-      commit('SET_ALL_USERS', updatedUsers);
+      // Update local state if the user belongs to the current company or if superadmin
+      if (role === 'superadmin' || existingUser.companyId === companyId) {
+        const updatedUsers = state.allUsers.map(user => 
+          user.id === userId ? updatedUser : user
+        );
+        commit('SET_ALL_USERS', updatedUsers);
+      }
 
       dispatch('showNotification', {
         type: 'success',

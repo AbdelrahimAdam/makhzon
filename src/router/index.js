@@ -139,6 +139,16 @@ const routes = [
       layout: 'empty'
     }
   },
+  // 🔹 NEW: Signup route
+  {
+    path: '/signup',
+    name: 'SignUp',
+    component: lazyLoad('SignUp'),
+    meta: { 
+      requiresGuest: true,
+      layout: 'empty'
+    }
+  },
   {
     path: '/',
     name: 'Dashboard',

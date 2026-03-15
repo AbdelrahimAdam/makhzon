@@ -135,7 +135,6 @@
         </div>
 
         <div class="flex items-center gap-3">
-          <!-- Type Filter -->
           <select
             v-model="filters.type"
             @change="handleFilterChange"
@@ -146,7 +145,6 @@
             <option value="dispatch">مواقع صرف</option>
           </select>
 
-          <!-- Status Filter -->
           <select
             v-model="filters.status"
             @change="handleFilterChange"
@@ -436,7 +434,7 @@
                       stroke="currentColor" 
                       viewBox="0 0 24 24"
                     >
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 011.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.831-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                     </svg>
                     حذف
                   </button>
@@ -726,7 +724,7 @@ export default {
     const selectedWarehouse = ref(null);
     const selectedWarehouseDetails = ref(null);
     
-    // Local warehouses state - renamed from localWarehouses to match template
+    // Local warehouses state
     const localWarehouses = ref([]);
     
     // Filters
@@ -834,6 +832,12 @@ export default {
       try {
         console.log('🔄 Loading all warehouses (primary + dispatch)...');
         
+        // Check if user is authenticated and has companyId
+        const userProfile = store.state.userProfile;
+        if (!userProfile || !userProfile.companyId) {
+          throw new Error('User profile or company ID not available');
+        }
+        
         // 1. Load primary warehouses (filters out dispatch)
         await store.dispatch('loadWarehousesEnhanced');
         const primaryWarehouses = store.state.warehouses || [];
@@ -848,7 +852,6 @@ export default {
         
         // Add dispatch warehouses if they exist
         if (dispatchWarehouses && Array.isArray(dispatchWarehouses)) {
-          // Check for duplicates before adding
           dispatchWarehouses.forEach(dispatchWarehouse => {
             const exists = allWarehouses.some(w => w.id === dispatchWarehouse.id);
             if (!exists) {
@@ -866,14 +869,6 @@ export default {
           dispatch: allWarehouses.filter(w => w.type === 'dispatch').length,
           other: allWarehouses.filter(w => w.type && w.type !== 'primary' && w.type !== 'dispatch').length
         });
-        
-        // Log some warehouse details for debugging
-        if (allWarehouses.length > 0) {
-          console.log('🔍 First few warehouses:');
-          allWarehouses.slice(0, 3).forEach((w, i) => {
-            console.log(`  ${i + 1}. ID: ${w.id}, Name: ${w.name_ar}, Type: ${w.type || 'none'}`);
-          });
-        }
         
       } catch (err) {
         console.error('❌ Error loading warehouses:', err);

@@ -223,8 +223,6 @@
 <script>
 import { ref, computed, watch } from 'vue';
 import { useStore } from 'vuex';
-import { db } from '@/firebase/config';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 export default {
   name: 'WarehouseModal',
@@ -316,17 +314,6 @@ export default {
       emit('close');
     };
 
-    const checkIfWarehouseExists = async (warehouseId) => {
-      try {
-        const warehouseRef = doc(db, 'warehouses', warehouseId);
-        const warehouseDoc = await getDoc(warehouseRef);
-        return warehouseDoc.exists();
-      } catch (error) {
-        console.error('Error checking warehouse existence:', error);
-        return false;
-      }
-    };
-
     const handleSubmit = async () => {
       if (!isFormValid.value) return;
 
@@ -334,7 +321,7 @@ export default {
       errorMessage.value = '';
 
       try {
-        // Prepare warehouse data
+        // Prepare warehouse data (without timestamps – store will add them)
         const warehouseData = {
           id: formData.value.id.trim(),
           name_ar: formData.value.name_ar.trim(),
@@ -344,44 +331,32 @@ export default {
           location: formData.value.location.trim(),
           description: formData.value.description.trim(),
           status: formData.value.status,
-          is_main: formData.value.is_main || false,
-          updated_at: new Date().toISOString()
+          is_main: formData.value.is_main || false
         };
 
-        // Check if warehouse already exists (for new warehouses only)
-        if (!props.warehouse) {
-          const exists = await checkIfWarehouseExists(warehouseData.id);
-          if (exists) {
-            throw new Error('المخزن موجود بالفعل');
-          }
-          warehouseData.created_at = new Date().toISOString();
-        } else {
-          warehouseData.created_at = props.warehouse.created_at;
-        }
-
-        // Check if user has permission
+        // Check permission using store getter
         if (!store.getters.canManageWarehouses) {
           throw new Error('ليس لديك صلاحية لإدارة المخازن');
         }
 
-        // Save warehouse to Firestore
-        const warehouseRef = doc(db, 'warehouses', warehouseData.id);
-        await setDoc(warehouseRef, warehouseData, { merge: true });
+        let result;
+        if (props.warehouse) {
+          // Update existing warehouse
+          result = await store.dispatch('updateWarehouse', {
+            warehouseId: props.warehouse.id,
+            warehouseData: warehouseData
+          });
+        } else {
+          // Add new warehouse – the store action will handle existence check
+          result = await store.dispatch('addWarehouse', warehouseData);
+        }
 
-        console.log('Warehouse saved successfully:', warehouseData.id);
-
-        // Show success notification
-        store.dispatch('showNotification', {
-          type: 'success',
-          message: `تم ${props.warehouse ? 'تحديث' : 'إضافة'} المخزن "${warehouseData.name_ar}" بنجاح`
-        });
-
-        // Emit save event
-        emit('save', warehouseData);
-        
-        // Close modal
-        closeModal();
-        
+        if (result) {
+          // Show success notification (already done in store action)
+          // Emit save event
+          emit('save', { ...warehouseData, id: props.warehouse ? props.warehouse.id : warehouseData.id });
+          closeModal();
+        }
       } catch (error) {
         console.error('Error saving warehouse:', error);
         errorMessage.value = error.message || 'حدث خطأ أثناء حفظ المخزن';
@@ -400,7 +375,7 @@ export default {
         resetForm();
         
         if (props.warehouse) {
-          // Edit mode - populate form with warehouse data
+          // Edit mode – populate form with warehouse data (exclude internal fields)
           formData.value = {
             id: props.warehouse.id,
             name_ar: props.warehouse.name_ar || '',

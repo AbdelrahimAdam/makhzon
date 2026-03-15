@@ -1,5 +1,5 @@
 import { db } from '@/firebase/config';
-import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, updateDoc, addDoc, deleteDoc, writeBatch, serverTimestamp, increment, runTransaction, startAfter,onSnapshot } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, updateDoc, addDoc, deleteDoc, writeBatch, serverTimestamp, increment, runTransaction, startAfter, onSnapshot,getCountFromServer } from 'firebase/firestore';
 import { ensureFirebaseReady } from '../utils/firebase-utils';
 import { ensureCompleteItemFields } from '../utils/helpers';
 import { PERFORMANCE_CONFIG, SPARK_CONFIG, TRANSACTION_TYPES } from '../utils/constants';
@@ -10,6 +10,9 @@ export default {
     warehouseId = null,
     forceRefresh = false 
   } = {}) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     commit('SET_INVENTORY_LOADING', true);
 
     try {
@@ -25,6 +28,7 @@ export default {
       if (targetWarehouse && targetWarehouse !== 'all') {
         itemsQuery = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           where('warehouse_id', '==', targetWarehouse),
           orderBy('name'),
           limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
@@ -32,6 +36,7 @@ export default {
       } else {
         itemsQuery = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           orderBy('name'),
           limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
         );
@@ -72,6 +77,13 @@ export default {
   },
 
   async loadAllInventory({ commit, state, dispatch }, { forceRefresh = false } = {}) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) {
+      console.error('❌ loadAllInventory: companyId missing');
+      commit('SET_INVENTORY_ERROR', 'لم يتم العثور على معرف الشركة');
+      return [];
+    }
+
     if (state.inventoryLoading) {
       console.log('Inventory load already in progress');
       return state.inventory;
@@ -107,6 +119,7 @@ export default {
       if (state.userProfile.role === 'superadmin' || state.userProfile.role === 'company_manager') {
         itemsQuery = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           orderBy('name'),
           limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
         );
@@ -120,6 +133,7 @@ export default {
         if (allowedWarehouses.includes('all')) {
           itemsQuery = query(
             itemsRef,
+            where('companyId', '==', companyId),        // NEW
             orderBy('name'),
             limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
           );
@@ -129,6 +143,7 @@ export default {
           if (warehouseIds.length === 1) {
             itemsQuery = query(
               itemsRef,
+              where('companyId', '==', companyId),      // NEW
               where('warehouse_id', '==', warehouseIds[0]),
               orderBy('name'),
               limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
@@ -137,6 +152,7 @@ export default {
             try {
               itemsQuery = query(
                 itemsRef,
+                where('companyId', '==', companyId),    // NEW
                 where('warehouse_id', 'in', warehouseIds),
                 orderBy('name'),
                 limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
@@ -145,6 +161,7 @@ export default {
               console.warn('"in" query failed, using first warehouse:', inError);
               itemsQuery = query(
                 itemsRef,
+                where('companyId', '==', companyId),    // NEW
                 where('warehouse_id', '==', warehouseIds[0]),
                 orderBy('name'),
                 limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
@@ -218,6 +235,12 @@ export default {
   },
 
   async loadMoreInventory({ commit, state, dispatch }) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) {
+      console.error('❌ loadMoreInventory: companyId missing');
+      return [];
+    }
+
     if (!state.pagination.hasMore || state.pagination.isFetching) {
       console.log('⏹️ Not loading more: hasMore =', state.pagination.hasMore, 'isFetching =', state.pagination.isFetching);
       return [];
@@ -273,6 +296,7 @@ export default {
       if (state.userProfile.role === 'superadmin' || state.userProfile.role === 'company_manager') {
         itemsQuery = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           orderBy('name'),
           ...(startAfterDoc ? [startAfter(startAfterDoc)] : []),
           limit(PERFORMANCE_CONFIG.SCROLL_LOAD)
@@ -283,6 +307,7 @@ export default {
         if (allowedWarehouses.includes('all')) {
           itemsQuery = query(
             itemsRef,
+            where('companyId', '==', companyId),        // NEW
             orderBy('name'),
             ...(startAfterDoc ? [startAfter(startAfterDoc)] : []),
             limit(PERFORMANCE_CONFIG.SCROLL_LOAD)
@@ -293,6 +318,7 @@ export default {
           if (warehouseIds.length === 1) {
             itemsQuery = query(
               itemsRef,
+              where('companyId', '==', companyId),      // NEW
               where('warehouse_id', '==', warehouseIds[0]),
               orderBy('name'),
               ...(startAfterDoc ? [startAfter(startAfterDoc)] : []),
@@ -302,6 +328,7 @@ export default {
             try {
               itemsQuery = query(
                 itemsRef,
+                where('companyId', '==', companyId),    // NEW
                 where('warehouse_id', 'in', warehouseIds),
                 orderBy('name'),
                 ...(startAfterDoc ? [startAfter(startAfterDoc)] : []),
@@ -311,6 +338,7 @@ export default {
               console.warn('"in" query failed, using single warehouse:', inError);
               itemsQuery = query(
                 itemsRef,
+                where('companyId', '==', companyId),    // NEW
                 where('warehouse_id', '==', warehouseIds[0]),
                 orderBy('name'),
                 ...(startAfterDoc ? [startAfter(startAfterDoc)] : []),
@@ -336,6 +364,7 @@ export default {
           console.log('🔄 Index missing or query error, falling back to simple query');
           const fallbackQuery = query(
             itemsRef,
+            where('companyId', '==', companyId),        // NEW
             orderBy('name'),
             limit(PERFORMANCE_CONFIG.SCROLL_LOAD)
           );
@@ -419,6 +448,9 @@ export default {
   // ADD INVENTORY ITEM ACTION (WITH NAME+CODE+COLOR MATCHING)
   // ============================================
   async addInventoryItem({ commit, state, dispatch }, { itemData, isAddingCartons = true }) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     commit('SET_OPERATION_LOADING', true);
     commit('CLEAR_OPERATION_ERROR');
 
@@ -480,10 +512,10 @@ export default {
       console.log('🔍 Searching for item with:', cleanedData);
 
       try {
-        // Query Firestore for exact match: name + code + color + warehouse
         const itemsRef = collection(db, 'items');
         const q = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           where('name', '==', cleanedData.name),
           where('code', '==', cleanedData.code),
           where('color', '==', cleanedData.color),
@@ -528,10 +560,8 @@ export default {
       if (existingItem && existingItemId) {
         console.log('🔄 UPDATING existing item with ID:', existingItemId);
         
-        // Get the item reference
         const itemRef = doc(db, 'items', existingItemId);
         
-        // 🔴 BUSINESS RULE 1: عدد الكراتين - OLD + NEW (only if adding cartons)
         const newCartonsCount = Number(itemData.cartons_count) || 0;
         const currentCartonsCount = Number(existingItem.cartons_count) || 0;
         let finalCartonsCount = currentCartonsCount;
@@ -541,7 +571,6 @@ export default {
           console.log(`➕ عدد الكراتين: ${currentCartonsCount} + ${newCartonsCount} = ${finalCartonsCount}`);
         }
         
-        // 🔴 BUSINESS RULE 2: عدد في الكرتونه - REPLACE OLD WITH NEW (only if user provides)
         const currentPerCarton = Number(existingItem.per_carton_count) || 12;
         const newPerCartonCount = Number(itemData.per_carton_count) || 0;
         let finalPerCartonCount = currentPerCarton;
@@ -551,18 +580,15 @@ export default {
           console.log(`🔄 عدد في الكرتونه: ${currentPerCarton} → ${newPerCartonCount}`);
         }
         
-        // 🔴 BUSINESS RULE 3: عدد القزاز الفردي - REPLACE OLD WITH NEW (user enters new total)
         const currentSingleBottlesCount = Number(existingItem.single_bottles_count) || 0;
         const newSingleBottlesCount = Number(itemData.single_bottles_count) || 0;
         let finalSingleBottlesCount = currentSingleBottlesCount;
         
-        // If user provided a value (including zero), replace the old value
         if (itemData.single_bottles_count !== undefined) {
           finalSingleBottlesCount = newSingleBottlesCount;
           console.log(`🔄 عدد القزاز الفردي: ${currentSingleBottlesCount} → ${newSingleBottlesCount}`);
         }
         
-        // 🔴 BUSINESS RULE 4: Convert single bottles to cartons if they complete a full carton
         if (finalSingleBottlesCount >= finalPerCartonCount) {
           additionalCartonsFromSingles = Math.floor(finalSingleBottlesCount / finalPerCartonCount);
           finalSingleBottlesCount = finalSingleBottlesCount % finalPerCartonCount;
@@ -571,18 +597,15 @@ export default {
           console.log(`🔄 Converting single bottles to cartons: added ${additionalCartonsFromSingles} cartons, remaining singles: ${finalSingleBottlesCount}`);
         }
         
-        // 🔴 BUSINESS RULE 5: Calculate quantities
         const currentRemaining = Number(existingItem.remaining_quantity) || 0;
         const currentTotalAdded = Number(existingItem.total_added) || 0;
         
-        // Calculate quantity from NEW cartons only (not from conversion)
         const oldCartonsQuantity = currentCartonsCount * currentPerCarton;
         const newCartonsQuantity = finalCartonsCount * finalPerCartonCount;
         const cartonsQuantityAdded = Math.max(0, newCartonsQuantity - oldCartonsQuantity);
         
-        // Calculate new totals
         totalQuantity = (finalCartonsCount * finalPerCartonCount) + finalSingleBottlesCount;
-        const newTotalAdded = currentTotalAdded + cartonsQuantityAdded; // Only add carton increases
+        const newTotalAdded = currentTotalAdded + cartonsQuantityAdded;
         
         console.log('📊 BUSINESS LOGIC RESULTS:', {
           finalCartons: finalCartonsCount,
@@ -593,7 +616,6 @@ export default {
           newTotalAdded: newTotalAdded
         });
         
-        // Prepare update data
         const updateData = {
           cartons_count: finalCartonsCount,
           per_carton_count: finalPerCartonCount,
@@ -603,12 +625,10 @@ export default {
           updated_by: state.user.uid
         };
         
-        // Only update total_added if carton quantity was added
         if (cartonsQuantityAdded > 0) {
           updateData.total_added = newTotalAdded;
         }
         
-        // Update optional fields if provided
         if (itemData.supplier !== undefined) {
           updateData.supplier = itemData.supplier?.trim() || null;
         }
@@ -625,19 +645,17 @@ export default {
           updateData.photo_url = itemData.photo_url;
         }
         
-        // 🔴 CRITICAL: Preserve original matching fields
         updateData.name = cleanedData.name;
         updateData.code = cleanedData.code;
         updateData.color = cleanedData.color;
         updateData.warehouse_id = cleanedData.warehouse_id;
         updateData.created_by = existingItem.created_by || state.user.uid;
+        // companyId remains unchanged – do not include in update
         
         console.log('💾 Update data for existing item:', updateData);
         
-        // Update the item in Firestore
         await updateDoc(itemRef, updateData);
         
-        // Create transaction record if quantity was added
         if (cartonsQuantityAdded > 0) {
           const transactionData = {
             type: 'ADD',
@@ -654,14 +672,14 @@ export default {
             user_id: state.user.uid,
             timestamp: serverTimestamp(),
             notes: itemData.notes || `إضافة كميات: ${newCartonsCount} كراتين`,
-            created_by: state.userProfile?.name || state.user?.email || 'نظام'
+            created_by: state.userProfile?.name || state.user?.email || 'نظام',
+            companyId: companyId          // NEW
           };
           
           await addDoc(collection(db, 'transactions'), transactionData);
           commit('ADD_RECENT_TRANSACTION', transactionData);
         }
         
-        // Create item history record
         const itemHistoryData = {
           item_id: existingItemId,
           warehouse_id: warehouseId,
@@ -685,25 +703,21 @@ export default {
             cartons_added: newCartonsCount,
             cartons_quantity_added: cartonsQuantityAdded,
             notes: itemData.notes
-          }
+          },
+          companyId: companyId          // NEW
         };
         
         await addDoc(collection(db, 'item_history'), itemHistoryData);
         
-        // 🔴 CRITICAL FIX: Create COMPLETE updated item
         const updatedItem = {
           id: existingItemId,
-          // Keep all existing fields
           ...existingItem,
-          // Add updated fields
           ...updateData,
-          // Ensure these critical fields are included
           cartons_count: finalCartonsCount,
           per_carton_count: finalPerCartonCount,
           single_bottles_count: finalSingleBottlesCount,
           remaining_quantity: totalQuantity,
           total_added: newTotalAdded,
-          // Timestamps
           updated_at: updateData.updated_at
         };
         
@@ -713,7 +727,6 @@ export default {
           updated_by: 'HIDDEN'
         });
         
-        // 🔴 FIX: Update local Vuex state with COMPLETE item
         commit('UPDATE_INVENTORY_ITEM', updatedItem);
         
         result = {
@@ -727,18 +740,13 @@ export default {
         };
         
       } else {
-        // ============================================
-        // 🔴 CREATE NEW ITEM (no existing match found)
-        // ============================================
         console.log('➕ CREATING new item (no matching name+code+color found)');
         isCreatingNewItem = true;
         
-        // Calculate quantities for new item
         const cartonsCount = Number(itemData.cartons_count) || 0;
         const perCartonCount = Number(itemData.per_carton_count) || 12;
         const singleBottlesCount = Number(itemData.single_bottles_count) || 0;
         
-        // Convert single bottles to cartons if complete
         let finalCartonsCount = cartonsCount;
         let finalSingleBottlesCount = singleBottlesCount;
         additionalCartonsFromSingles = 0;
@@ -751,14 +759,12 @@ export default {
           console.log(`🔄 Converting single bottles for new item: ${singleBottlesCount} → ${additionalCartonsFromSingles} cartons + ${finalSingleBottlesCount} singles`);
         }
         
-        // Calculate total quantity
         totalQuantity = (finalCartonsCount * perCartonCount) + finalSingleBottlesCount;
         
         if (totalQuantity <= 0) {
           throw new Error('يجب إدخال كمية صحيحة للإضافة (أكبر من صفر)');
         }
         
-        // Prepare data for new item
         const newItemData = {
           name: cleanedData.name,
           code: cleanedData.code,
@@ -776,15 +782,14 @@ export default {
           created_at: serverTimestamp(),
           updated_at: serverTimestamp(),
           created_by: state.user.uid,
-          updated_by: state.user.uid
+          updated_by: state.user.uid,
+          companyId: companyId          // NEW
         };
         
         console.log('💾 New item data:', newItemData);
         
-        // Add new item to Firestore
         const docRef = await addDoc(collection(db, 'items'), newItemData);
         
-        // Create transaction record
         const transactionData = {
           type: 'ADD',
           item_id: docRef.id,
@@ -802,12 +807,12 @@ export default {
           notes: additionalCartonsFromSingles > 0 ? 
             `إضافة جديدة (تحويل ${additionalCartonsFromSingles} كرتون من القزاز الفردي)` : 
             'عملية إضافة جديدة',
-          created_by: state.userProfile?.name || state.user?.email || 'نظام'
+          created_by: state.userProfile?.name || state.user?.email || 'نظام',
+          companyId: companyId          // NEW
         };
         
         await addDoc(collection(db, 'transactions'), transactionData);
         
-        // 🔴 CRITICAL FIX: Create COMPLETE new item
         const newItem = {
           id: docRef.id,
           ...newItemData
@@ -819,7 +824,6 @@ export default {
           updated_by: 'HIDDEN'
         });
         
-        // 🔴 FIX: Add to local state
         commit('UPDATE_INVENTORY_ITEM', newItem);
         commit('ADD_RECENT_TRANSACTION', transactionData);
         
@@ -835,7 +839,6 @@ export default {
         };
       }
 
-      // 🔴 FIX: Show notification
       let successMessage = '';
       
       if (result.type === 'updated') {
@@ -874,13 +877,15 @@ export default {
   // UPDATE ITEM ACTION (WITH VALIDATION FIX)
   // ============================================
   async updateItem({ commit, state, dispatch }, { itemId, itemData }) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     commit('SET_OPERATION_LOADING', true);
     commit('CLEAR_OPERATION_ERROR');
 
     console.log('🔄 Updating item via store:', { itemId, itemData });
 
     try {
-      // 🔴 VALIDATION 1: Authentication
       if (!state.userProfile) {
         throw new Error('يجب تسجيل الدخول أولاً');
       }
@@ -889,7 +894,6 @@ export default {
         throw new Error('ليس لديك صلاحية لتعديل الأصناف');
       }
 
-      // 🔴 VALIDATION 2: Required fields
       console.log('🔍 Validation debug:', {
         name: itemData.name,
         nameTrimmed: itemData.name?.trim(),
@@ -928,7 +932,6 @@ export default {
         throw new Error(`الحقول التالية مطلوبة: ${missingFields.join('، ')}`);
       }
 
-      // 🔴 VALIDATION 3: Warehouse access
       const warehouseId = itemData.warehouse_id;
       if (state.userProfile.role === 'warehouse_manager') {
         const allowedWarehouses = state.userProfile.allowed_warehouses || [];
@@ -939,7 +942,6 @@ export default {
         }
       }
 
-      // 🔴 CRITICAL: Wait for Firebase initialization
       console.log('⏳ Ensuring Firebase is ready for update...');
       try {
         await ensureFirebaseReady();
@@ -953,7 +955,6 @@ export default {
         throw new Error('Firestore database not available');
       }
 
-      // Import Firestore functions inside the action
       const firebaseFirestore = await import('firebase/firestore');
       const {
         doc,
@@ -965,7 +966,6 @@ export default {
         Timestamp
       } = firebaseFirestore;
 
-      // ========== GET EXISTING ITEM ==========
       const itemRef = doc(db, 'items', itemId);
       let itemDoc;
       let existingItem;
@@ -979,14 +979,16 @@ export default {
 
         existingItem = itemDoc.data();
         
-        // 🔴 CRITICAL FIX: Convert Firestore Timestamps to plain objects
+        // Verify companyId matches
+        if (existingItem.companyId !== companyId) {
+          throw new Error('لا يمكنك تعديل هذا الصنف');
+        }
+
         existingItem = JSON.parse(JSON.stringify(existingItem, (key, value) => {
           if (value && typeof value === 'object' && value.toDate) {
-            // Convert Firestore Timestamp to ISO string
             return value.toDate().toISOString();
           }
           if (value && typeof value === 'object' && value._seconds !== undefined && value._nanoseconds !== undefined) {
-            // Handle raw Firestore Timestamp object
             return new Date(value._seconds * 1000).toISOString();
           }
           return value;
@@ -1007,12 +1009,10 @@ export default {
         throw new Error('فشل في تحميل بيانات الصنف');
       }
 
-      // ========== CALCULATE NEW QUANTITIES ==========
       const newCartonsCount = Number(itemData.cartons_count) || Number(existingItem.cartons_count) || 0;
       const newPerCartonCount = Number(itemData.per_carton_count) || Number(existingItem.per_carton_count) || 12;
       const newSingleBottlesCount = Number(itemData.single_bottles_count) || Number(existingItem.single_bottles_count) || 0;
       
-      // 🔴 BUSINESS RULE: Convert single bottles to cartons if complete
       let finalCartonsCount = newCartonsCount;
       let finalSingleBottlesCount = newSingleBottlesCount;
       let additionalCartonsFromSingles = 0;
@@ -1025,16 +1025,13 @@ export default {
         console.log(`🔄 Converting single bottles to cartons: added ${additionalCartonsFromSingles} cartons, remaining singles: ${finalSingleBottlesCount}`);
       }
       
-      // Calculate total quantity
       const newTotalQuantity = (finalCartonsCount * newPerCartonCount) + finalSingleBottlesCount;
       
-      // Calculate old total quantity
       const oldCartons = Number(existingItem.cartons_count) || 0;
       const oldPerCarton = Number(existingItem.per_carton_count) || 12;
       const oldSingles = Number(existingItem.single_bottles_count) || 0;
       const oldTotalQuantity = (oldCartons * oldPerCarton) + oldSingles;
       
-      // Calculate quantity change
       const quantityDiff = newTotalQuantity - oldTotalQuantity;
 
       console.log('📊 Quantity calculations:', {
@@ -1044,39 +1041,35 @@ export default {
         convertedCartons: additionalCartonsFromSingles
       });
 
-      // ========== PREPARE UPDATE DATA ==========
       const updateData = {
-        // 🔴 REQUIRED FIELDS
         name: itemData.name.trim(),
         code: itemData.code.trim(),
         color: itemData.color.trim(),
         warehouse_id: warehouseId.trim(),
         
-        // 🔴 QUANTITY FIELDS
         cartons_count: finalCartonsCount,
         per_carton_count: newPerCartonCount,
         single_bottles_count: finalSingleBottlesCount,
         remaining_quantity: newTotalQuantity,
         
-        // 🔴 Only update total_added if quantity increased
         ...(quantityDiff > 0 && {
           total_added: (Number(existingItem.total_added) || 0) + quantityDiff
         }),
         
-        // 🔴 OPTIONAL FIELDS - preserve existing values if not provided
         supplier: itemData.supplier?.trim() || existingItem.supplier || '',
         item_location: itemData.item_location?.trim() || existingItem.item_location || '',
         notes: itemData.notes?.trim() || existingItem.notes || '',
         photo_url: itemData.photo_url || existingItem.photo_url || '',
         
-        // 🔴 TIMESTAMPS - Use Firestore serverTimestamp
         updated_at: serverTimestamp(),
         updated_by: state.user.uid
       };
 
+      // Ensure companyId is not changed
+      delete updateData.companyId; // if present, remove it
+
       console.log('💾 Update data for item:', updateData);
 
-      // ========== UPDATE IN FIRESTORE ==========
       try {
         await updateDoc(itemRef, updateData);
         console.log('✅ Item updated in Firestore successfully');
@@ -1085,7 +1078,6 @@ export default {
         throw new Error('فشل في تحديث الصنف في قاعدة البيانات');
       }
 
-      // ========== CREATE TRANSACTION IF QUANTITY CHANGED ==========
       if (quantityDiff !== 0 || existingItem.warehouse_id !== warehouseId) {
         try {
           const transactionData = {
@@ -1103,12 +1095,12 @@ export default {
             user_id: state.user.uid,
             timestamp: serverTimestamp(),
             notes: itemData.notes?.trim() || `تعديل الصنف${additionalCartonsFromSingles > 0 ? ` (تحويل ${additionalCartonsFromSingles} كرتون من القزاز الفردي)` : ''}`,
-            created_by: state.userProfile?.name || state.user?.email || 'نظام'
+            created_by: state.userProfile?.name || state.user?.email || 'نظام',
+            companyId: companyId          // NEW
           };
 
           await addDoc(collection(db, 'transactions'), transactionData);
           
-          // 🔴 FIX: Create a plain JavaScript object for Vuex
           const transactionForVuex = {
             ...transactionData,
             id: `temp_${Date.now()}`,
@@ -1123,7 +1115,6 @@ export default {
         }
       }
 
-      // ========== CREATE ITEM HISTORY RECORD ==========
       try {
         const itemHistoryData = {
           item_id: itemId,
@@ -1146,7 +1137,8 @@ export default {
             new_single: finalSingleBottlesCount,
             single_bottles_converted_to_cartons: additionalCartonsFromSingles,
             notes: itemData.notes
-          }
+          },
+          companyId: companyId          // NEW
         };
 
         await addDoc(collection(db, 'item_history'), itemHistoryData);
@@ -1155,21 +1147,16 @@ export default {
         console.warn('⚠️ Could not create item history:', historyError);
       }
 
-      // ========== UPDATE LOCAL STATE WITHOUT RELOADING INVENTORY ==========
       const updatedItem = {
         id: itemId,
-        // Keep existing fields that might not be in updateData
         created_at: existingItem.created_at,
         created_by: existingItem.created_by,
-        // Add updated fields
         ...updateData,
-        // Ensure total_added is included
         total_added: updateData.total_added !== undefined ? updateData.total_added : Number(existingItem.total_added) || 0,
-        // Convert serverTimestamp to plain date
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        companyId: companyId          // ensure it's included
       };
 
-      // 🔴 CRITICAL FIX: Remove any non-serializable properties
       const cleanUpdatedItem = JSON.parse(JSON.stringify(updatedItem));
 
       console.log('📤 Clean updated item for Vuex state:', {
@@ -1178,10 +1165,8 @@ export default {
         updated_by: 'HIDDEN'
       });
 
-      // 🔴 CRITICAL FIX: Update single item in Vuex state WITHOUT reloading all inventory
       commit('UPDATE_INVENTORY_ITEM', cleanUpdatedItem);
 
-      // 🔴 FIXED: Show success notification
       let successMessage = `✅ تم تحديث الصنف "${updateData.name}" بنجاح`;
       
       if (additionalCartonsFromSingles > 0) {
@@ -1238,18 +1223,19 @@ export default {
   // DELETE ITEM ACTION
   // ============================================
   async deleteItem({ commit, state, dispatch }, itemId) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     commit('SET_OPERATION_LOADING', true);
     commit('CLEAR_OPERATION_ERROR');
 
     try {
       console.log(`🗑️ DELETE Item Action - SPARK Plan: ${itemId}`);
 
-      // 🔴 VALIDATION 1: Authentication
       if (!state.userProfile) {
         throw new Error('يجب تسجيل الدخول أولاً');
       }
 
-      // 🔴 VALIDATION 2: Only superadmin can delete
       if (state.userProfile.role !== 'superadmin') {
         throw new Error('فقط المشرف العام يمكنه حذف الأصناف');
       }
@@ -1258,7 +1244,6 @@ export default {
         throw new Error('معرف الصنف مطلوب');
       }
 
-      // 🔴 CRITICAL: Ensure Firebase is ready
       console.log('⏳ Ensuring Firebase is ready for delete...');
       await ensureFirebaseReady();
       console.log('✅ Firebase ready for delete');
@@ -1267,7 +1252,6 @@ export default {
         throw new Error('Firestore database not available');
       }
 
-      // 🔴 DYNAMIC IMPORT
       const firebaseFirestore = await import('firebase/firestore');
       const {
         doc,
@@ -1279,7 +1263,6 @@ export default {
         writeBatch
       } = firebaseFirestore;
 
-      // ========== STEP 1: GET ITEM DETAILS ==========
       const itemRef = doc(db, 'items', itemId);
       const itemDoc = await getDoc(itemRef);
       
@@ -1288,6 +1271,12 @@ export default {
       }
 
       const itemData = itemDoc.data();
+
+      // Verify companyId
+      if (itemData.companyId !== companyId) {
+        throw new Error('لا يمكنك حذف هذا الصنف');
+      }
+
       const itemName = itemData.name || 'غير معروف';
       const warehouseId = itemData.warehouse_id;
 
@@ -1299,16 +1288,10 @@ export default {
         quantity: itemData.remaining_quantity
       });
 
-      // ========== STEP 2: USER CONFIRMATION (via modal - already handled) ==========
-      // The ConfirmDeleteModal already shows confirmation, so just proceed
-
-      // ========== STEP 3: CREATE BATCH OPERATION ==========
       const batch = writeBatch(db);
 
-      // 3A. DELETE THE ITEM
       batch.delete(itemRef);
 
-      // 3B. CREATE TRANSACTION RECORD
       const transactionRef = doc(collection(db, 'transactions'));
       const transactionData = {
         type: 'DELETE',
@@ -1321,7 +1304,7 @@ export default {
         previous_quantity: itemData.remaining_quantity || 0,
         previous_cartons: itemData.cartons_count || 0,
         previous_single_bottles: itemData.single_bottles_count || 0,
-        quantity: -(itemData.remaining_quantity || 0), // Negative for delete
+        quantity: -(itemData.remaining_quantity || 0),
         total_delta: -(itemData.remaining_quantity || 0),
         new_remaining: 0,
         user_id: state.user.uid,
@@ -1333,19 +1316,17 @@ export default {
         notes: `حذف الصنف "${itemName}"`,
         created_by: state.userProfile?.name || state.user?.email || 'نظام',
         
-        // Display fields for transactions page
         display_type: 'حذف',
         display_quantity: `${itemData.remaining_quantity || 0} وحدة`,
         display_destination: 'حذف نهائي',
         
-        // Technical metadata
         atomic_operation: true,
-        detailed_breakdown_applied: true
+        detailed_breakdown_applied: true,
+        companyId: companyId          // NEW
       };
       
       batch.set(transactionRef, transactionData);
 
-      // 3C. CREATE ITEM HISTORY RECORD
       const historyRef = doc(collection(db, 'item_history'));
       const historyData = {
         item_id: itemId,
@@ -1370,21 +1351,17 @@ export default {
           supplier: itemData.supplier,
           notes: 'حذف نهائي للصنف من النظام',
           transaction_id: transactionRef.id
-        }
+        },
+        companyId: companyId          // NEW
       };
       
       batch.set(historyRef, historyData);
 
-      // ========== STEP 4: EXECUTE BATCH ==========
       await batch.commit();
       console.log('✅ Batch operations committed successfully');
 
-      // ========== STEP 5: UPDATE LOCAL STATE ==========
-      
-      // 5A. Remove from main inventory
       commit('REMOVE_INVENTORY_ITEM', itemId);
       
-      // 5B. Update search results if item is there
       if (state.search.results.length > 0) {
         const updatedSearchResults = state.search.results.filter(item => item.id !== itemId);
         if (updatedSearchResults.length !== state.search.results.length) {
@@ -1396,24 +1373,20 @@ export default {
         }
       }
       
-      // 5C. Create transaction object for Vuex state
       const transactionForState = {
         id: transactionRef.id,
         ...transactionData,
         timestamp: new Date(),
         created_at: new Date(),
         
-        // Ensure display fields
         display_quantity: `${itemData.remaining_quantity || 0} وحدة`,
         display_type: 'حذف',
         display_destination: 'حذف نهائي'
       };
       
-      // Add to transactions and recent transactions
       commit('ADD_TRANSACTION', transactionForState);
       commit('ADD_RECENT_TRANSACTION', transactionForState);
 
-      // ========== STEP 6: SHOW SUCCESS ==========
       dispatch('showNotification', {
         type: 'success',
         title: 'تم الحذف بنجاح',
@@ -1422,7 +1395,6 @@ export default {
         timeout: 5000
       });
 
-      // ========== STEP 7: LOG SUCCESS ==========
       console.log('📊 Delete completed successfully:', {
         itemId,
         itemName,
@@ -1444,7 +1416,6 @@ export default {
       
       commit('SET_OPERATION_ERROR', error.message);
       
-      // 🔴 USER-FRIENDLY ERROR MESSAGES
       let errorMessage = error.message;
       
       if (error.code === 'permission-denied') {
@@ -1482,6 +1453,9 @@ export default {
     newQuantities,
     isAddingCartons = true
   }) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     commit('SET_OPERATION_LOADING', true);
     commit('CLEAR_OPERATION_ERROR');
 
@@ -1500,7 +1474,6 @@ export default {
         throw new Error('بيانات التحديث غير مكتملة');
       }
 
-      // Check warehouse access
       const warehouseId = existingItem.warehouse_id;
       if (state.userProfile.role === 'warehouse_manager') {
         const allowedWarehouses = state.userProfile.allowed_warehouses || [];
@@ -1511,7 +1484,6 @@ export default {
         }
       }
 
-      // Get the current item from Firestore
       const itemRef = doc(db, 'items', itemId);
       const itemDoc = await getDoc(itemRef);
 
@@ -1521,12 +1493,15 @@ export default {
 
       const currentItem = itemDoc.data();
 
-      // Calculate new quantities
+      // Verify companyId
+      if (currentItem.companyId !== companyId) {
+        throw new Error('لا يمكنك تحديث هذا الصنف');
+      }
+
       const cartonsCount = newQuantities.cartons_count || 0;
       const perCartonCount = newQuantities.per_carton_count || 12;
       const singleBottlesCount = newQuantities.single_bottles_count || 0;
 
-      // Calculate the added quantity
       const addedCartonsQuantity = cartonsCount * perCartonCount;
       const addedTotalQuantity = addedCartonsQuantity + singleBottlesCount;
 
@@ -1534,17 +1509,15 @@ export default {
         throw new Error('يجب إدخال كمية صحيحة للإضافة');
       }
 
-      // Calculate new totals
       const currentRemaining = currentItem.remaining_quantity || 0;
       const currentTotalAdded = currentItem.total_added || 0;
 
       const newRemaining = currentRemaining + addedTotalQuantity;
       const newTotalAdded = currentTotalAdded + addedTotalQuantity;
 
-      // Update data
       const updateData = {
         cartons_count: (currentItem.cartons_count || 0) + cartonsCount,
-        per_carton_count: perCartonCount, // Use the new per_carton_count
+        per_carton_count: perCartonCount,
         single_bottles_count: (currentItem.single_bottles_count || 0) + singleBottlesCount,
         remaining_quantity: newRemaining,
         total_added: newTotalAdded,
@@ -1552,7 +1525,6 @@ export default {
         updated_by: state.user.uid
       };
 
-      // Optional fields update if provided
       if (newQuantities.supplier !== undefined) {
         updateData.supplier = newQuantities.supplier?.trim() || '';
       }
@@ -1565,10 +1537,8 @@ export default {
         updateData.notes = newQuantities.notes?.trim() || '';
       }
 
-      // Update the item
       await updateDoc(itemRef, updateData);
 
-      // Create transaction record
       const transactionData = {
         type: TRANSACTION_TYPES.ADD,
         item_id: itemId,
@@ -1584,12 +1554,12 @@ export default {
         user_id: state.user.uid,
         timestamp: serverTimestamp(),
         notes: newQuantities.notes || `إضافة كميات للصنف: ${cartonsCount} كراتين، ${singleBottlesCount} فردي`,
-        created_by: state.userProfile?.name || state.user?.email || 'نظام'
+        created_by: state.userProfile?.name || state.user?.email || 'نظام',
+        companyId: companyId          // NEW
       };
 
       await addDoc(collection(db, 'transactions'), transactionData);
 
-      // Create item history record
       const itemHistoryData = {
         item_id: itemId,
         warehouse_id: warehouseId,
@@ -1608,12 +1578,12 @@ export default {
           single_added: singleBottlesCount,
           total_added: addedTotalQuantity,
           notes: newQuantities.notes
-        }
+        },
+        companyId: companyId          // NEW
       };
 
       await addDoc(collection(db, 'item_history'), itemHistoryData);
 
-      // Update local state
       const updatedItem = {
         id: itemId,
         ...currentItem,
@@ -1656,6 +1626,9 @@ export default {
   // TRANSFER ITEM ACTION
   // ============================================
   async transferItem({ commit, state, dispatch }, transferData) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     commit('SET_OPERATION_LOADING', true);
     commit('CLEAR_OPERATION_ERROR');
 
@@ -1668,7 +1641,6 @@ export default {
         singles: transferData.single_bottles_count
       });
 
-      // ========== VALIDATION ==========
       if (!state.userProfile) {
         throw new Error('يجب تسجيل الدخول أولاً');
       }
@@ -1677,7 +1649,6 @@ export default {
         throw new Error('ليس لديك صلاحية لنقل الأصناف');
       }
 
-      // Validate required fields
       if (!transferData.item_id || !transferData.from_warehouse_id || !transferData.to_warehouse_id) {
         throw new Error('بيانات النقل غير مكتملة (معرف الصنف، المخزن المصدر، المخزن الهدف)');
       }
@@ -1686,7 +1657,6 @@ export default {
         throw new Error('لا يمكن نقل الصنف إلى نفس المخزن');
       }
 
-      // Check warehouse access
       if (state.userProfile.role === 'warehouse_manager') {
         const allowedWarehouses = state.userProfile.allowed_warehouses || [];
         if (allowedWarehouses.length > 0 && !allowedWarehouses.includes('all')) {
@@ -1697,11 +1667,9 @@ export default {
         }
       }
 
-      // ========== ATOMIC TRANSACTION ==========
       console.log('⚡ Starting atomic transaction for transfer...');
       
       const result = await runTransaction(db, async (transaction) => {
-        // ========== STEP 1: GET SOURCE ITEM ==========
         const sourceItemRef = doc(db, 'items', transferData.item_id);
         const sourceItemDoc = await transaction.get(sourceItemRef);
         
@@ -1710,6 +1678,12 @@ export default {
         }
 
         const sourceItem = sourceItemDoc.data();
+
+        // Verify companyId
+        if (sourceItem.companyId !== companyId) {
+          throw new Error('لا يمكنك نقل هذا الصنف');
+        }
+
         console.log('📦 Source item data:', {
           id: transferData.item_id,
           name: sourceItem.name,
@@ -1722,12 +1696,10 @@ export default {
           total: sourceItem.remaining_quantity
         });
 
-        // Verify source warehouse matches
         if (sourceItem.warehouse_id !== transferData.from_warehouse_id) {
           throw new Error(`الصنف ليس في المخزن المصدر المحدد. يوجد في: ${sourceItem.warehouse_id}`);
         }
 
-        // ========== STEP 2: VALIDATE QUANTITIES ==========
         const currentCartons = Number(sourceItem.cartons_count) || 0;
         const currentSingles = Number(sourceItem.single_bottles_count) || 0;
         const perCarton = Number(sourceItem.per_carton_count) || 12;
@@ -1741,17 +1713,14 @@ export default {
           perCarton: perCarton
         });
 
-        // Validate cartons
         if (transferCartons > currentCartons) {
           throw new Error(`عدد الكرتونات المطلوبة (${transferCartons}) أكبر من المتاح (${currentCartons})`);
         }
         
-        // Validate singles
         if (transferSingles > currentSingles) {
           throw new Error(`عدد القزاز الفردي المطلوب (${transferSingles}) أكبر من المتاح (${currentSingles})`);
         }
 
-        // Calculate total quantities
         const transferTotalQuantity = (transferCartons * perCarton) + transferSingles;
         const currentTotalQuantity = (currentCartons * perCarton) + currentSingles;
         
@@ -1763,7 +1732,6 @@ export default {
           throw new Error(`الكمية المطلوبة للنقل (${transferTotalQuantity}) أكبر من الكمية المتاحة (${currentTotalQuantity})`);
         }
 
-        // ========== STEP 3: UPDATE SOURCE ITEM (REDUCE) ==========
         const newSourceCartons = currentCartons - transferCartons;
         const newSourceSingles = currentSingles - transferSingles;
         const newSourceTotal = (newSourceCartons * perCarton) + newSourceSingles;
@@ -1773,7 +1741,6 @@ export default {
           after: { cartons: newSourceCartons, singles: newSourceSingles, total: newSourceTotal }
         });
 
-        // Update source item
         transaction.update(sourceItemRef, {
           cartons_count: newSourceCartons,
           single_bottles_count: newSourceSingles,
@@ -1782,7 +1749,6 @@ export default {
           updated_by: state.user.uid
         });
 
-        // ========== STEP 4: CHECK DESTINATION ITEM ==========
         console.log('🔍 Checking for existing item in destination...');
         
         const cleanedData = {
@@ -1797,6 +1763,7 @@ export default {
         const itemsRef = collection(db, 'items');
         const destQuery = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           where('name', '==', cleanedData.name),
           where('code', '==', cleanedData.code),
           where('color', '==', cleanedData.color),
@@ -1810,7 +1777,6 @@ export default {
         let existingDestinationItem = null;
 
         if (!destSnapshot.empty) {
-          // ✅ ITEM EXISTS IN DESTINATION - UPDATE IT
           destItemRef = doc(db, 'items', destSnapshot.docs[0].id);
           existingDestinationItem = destSnapshot.docs[0].data();
           
@@ -1879,7 +1845,6 @@ export default {
           transaction.update(destItemRef, updateData);
 
         } else {
-          // ❌ ITEM DOESN'T EXIST IN DESTINATION - CREATE NEW
           console.log('➕ Creating new item in destination (no matching item found)');
           
           destItemRef = doc(collection(db, 'items'));
@@ -1916,7 +1881,8 @@ export default {
             created_at: serverTimestamp(),
             updated_at: serverTimestamp(),
             created_by: state.user.uid,
-            updated_by: state.user.uid
+            updated_by: state.user.uid,
+            companyId: companyId          // NEW
           };
 
           console.log('📝 New destination item data:', newItemData);
@@ -1924,7 +1890,6 @@ export default {
           transaction.set(destItemRef, newItemData);
         }
 
-        // ========== STEP 5: CREATE TRANSACTION RECORD ==========
         const transactionRef = doc(collection(db, 'transactions'));
         
         const transactionRecord = {
@@ -1977,12 +1942,12 @@ export default {
           
           source_warehouse_name: transferData.from_warehouse_name || '',
           destination_warehouse_name: transferData.to_warehouse_name || '',
-          created_by: state.userProfile?.name || state.user?.email || 'نظام'
+          created_by: state.userProfile?.name || state.user?.email || 'نظام',
+          companyId: companyId          // NEW
         };
 
         transaction.set(transactionRef, transactionRecord);
 
-        // ========== STEP 6: CREATE ITEM HISTORY RECORDS ==========
         const sourceHistoryRef = doc(collection(db, 'item_history'));
         const sourceHistoryData = {
           item_id: transferData.item_id,
@@ -2014,7 +1979,8 @@ export default {
             color: sourceItem.color,
             notes: transferData.notes,
             transaction_id: transactionRef.id
-          }
+          },
+          companyId: companyId          // NEW
         };
         
         transaction.set(sourceHistoryRef, sourceHistoryData);
@@ -2048,12 +2014,12 @@ export default {
             notes: transferData.notes,
             transaction_id: transactionRef.id,
             is_new_item: isNewItem
-          }
+          },
+          companyId: companyId          // NEW
         };
         
         transaction.set(destHistoryRef, destHistoryData);
 
-        // Return comprehensive result
         return {
           sourceItemId: transferData.item_id,
           destItemId: destItemRef.id,
@@ -2070,7 +2036,6 @@ export default {
         };
       });
 
-      // ========== UPDATE LOCAL VUEX STATE ==========
       console.log('✅ Atomic transaction completed successfully');
       
       const sourceIndex = state.inventory.findIndex(item => item.id === transferData.item_id);
@@ -2173,6 +2138,9 @@ export default {
   // DISPATCH ITEM ACTION
   // ============================================
   async dispatchItem({ commit, state, dispatch }, dispatchData) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     commit('SET_OPERATION_LOADING', true);
     commit('CLEAR_OPERATION_ERROR');
 
@@ -2185,7 +2153,6 @@ export default {
         single_bottles_count: dispatchData.single_bottles_count
       });
 
-      // 🔴 VALIDATION: User authentication
       if (!state.userProfile) {
         throw new Error('يجب تسجيل الدخول أولاً');
       }
@@ -2194,7 +2161,6 @@ export default {
         throw new Error('ليس لديك صلاحية لصرف الأصناف');
       }
 
-      // 🔴 VALIDATION: Required fields
       const requiredFields = [
         { field: dispatchData.item_id, name: 'معرف الصنف' },
         { field: dispatchData.from_warehouse_id, name: 'المخزن المصدر' },
@@ -2207,7 +2173,6 @@ export default {
         throw new Error(`بيانات الصرف غير مكتملة: ${missingFields.map(f => f.name).join('، ')}`);
       }
 
-      // 🔴 VALIDATION: Warehouse access
       if (state.userProfile.role === 'warehouse_manager') {
         const allowedWarehouses = state.userProfile.allowed_warehouses || [];
         if (allowedWarehouses.length > 0 && !allowedWarehouses.includes('all')) {
@@ -2217,7 +2182,6 @@ export default {
         }
       }
 
-      // 🔴 ENSURE FIREBASE IS READY
       console.log('⏳ Ensuring Firebase is ready for dispatch...');
       await ensureFirebaseReady();
       console.log('✅ Firebase ready for dispatch');
@@ -2226,13 +2190,11 @@ export default {
         throw new Error('Firestore database not available');
       }
 
-      // ========== ARABIC TEXT NORMALIZATION ==========
       const normalizeArabic = (text) => {
         if (!text || typeof text !== 'string') return '';
         return text.trim();
       };
 
-      // Prepare normalized Arabic data
       const normalizedData = {
         item_id: dispatchData.item_id,
         from_warehouse_id: dispatchData.from_warehouse_id,
@@ -2256,7 +2218,6 @@ export default {
 
       console.log('📤 Normalized dispatch data:', normalizedData);
 
-      // ========== ATOMIC TRANSACTION ==========
       const result = await runTransaction(db, async (transaction) => {
         const itemRef = doc(db, 'items', normalizedData.item_id);
         const itemDoc = await transaction.get(itemRef);
@@ -2266,6 +2227,11 @@ export default {
         }
 
         const itemData = itemDoc.data();
+
+        // Verify companyId
+        if (itemData.companyId !== companyId) {
+          throw new Error('لا يمكنك صرف هذا الصنف');
+        }
 
         if (itemData.warehouse_id !== normalizedData.from_warehouse_id) {
           throw new Error(`الصنف ليس في المخزن المصدر المحدد. يوجد في: ${itemData.warehouse_id}`);
@@ -2394,7 +2360,8 @@ export default {
           
           atomic_operation: true,
           detailed_breakdown_applied: true,
-          utf8_encoded: true
+          utf8_encoded: true,
+          companyId: companyId          // NEW
         };
 
         transaction.set(transactionRef, transactionData);
@@ -2433,7 +2400,8 @@ export default {
             transaction_id: transactionRef.id,
             per_carton: perCarton,
             detailed_dispatch: true
-          }
+          },
+          companyId: companyId          // NEW
         };
         
         transaction.set(historyRef, historyData);
@@ -2452,7 +2420,6 @@ export default {
         };
       });
 
-      // ========== UPDATE LOCAL STATE ==========
       console.log('✅ Transaction completed successfully');
       
       const inventoryIndex = state.inventory.findIndex(item => item.id === normalizedData.item_id);
@@ -2535,6 +2502,9 @@ export default {
   // GET ITEM BY ID / CODE / NAME
   // ============================================
   async getItemById({ state, dispatch }, { itemId, itemCode, itemName }) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     try {
       console.log('🔍 GET ITEM (Real-time):', { itemId, itemCode, itemName });
       if (!itemId && !itemCode && !itemName) {
@@ -2555,6 +2525,9 @@ export default {
           const itemDoc = await getDoc(doc(db, 'items', itemId));
           if (itemDoc.exists()) {
             const itemData = itemDoc.data();
+            if (itemData.companyId !== companyId) {
+              throw new Error('لا يمكنك الوصول إلى هذا الصنف');
+            }
             if (state.user && state.userProfile?.role === 'warehouse_manager') {
               const allowedWarehouses = state.userProfile.allowed_warehouses || [];
               if (allowedWarehouses.length > 0 && !allowedWarehouses.includes('all')) {
@@ -2578,6 +2551,7 @@ export default {
         const itemsRef = collection(db, 'items');
         const q = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           where('code', '==', itemCode),
           limit(5)
         );
@@ -2607,6 +2581,7 @@ export default {
         const itemsRef = collection(db, 'items');
         const q = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           where('name', '==', itemName),
           limit(10)
         );
@@ -2657,6 +2632,9 @@ export default {
   },
 
   async getItemsFromWarehouse({ state, dispatch }, { warehouseId, limitResults = 20 }) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     try {
       console.log('🔄 Getting items from warehouse (real-time):', warehouseId);
       if (!warehouseId) {
@@ -2679,6 +2657,7 @@ export default {
       try {
         const q = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           where('warehouse_id', '==', warehouseId),
           orderBy('createdAt', 'desc'),
           limit(limitResults)
@@ -2697,6 +2676,7 @@ export default {
         console.warn('Using alternative query...', error);
         const q = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           where('warehouse_id', '==', warehouseId),
           limit(limitResults)
         );
@@ -2726,6 +2706,9 @@ export default {
   },
 
   async loadWarehouseItems({ commit, state, dispatch }, { warehouseId, limit = 50, lastDoc = null } = {}) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     try {
       if (!warehouseId) {
         throw new Error('معرف المخزن مطلوب');
@@ -2755,6 +2738,7 @@ export default {
 
         itemsQuery = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           where('warehouse_id', '==', warehouseId),
           orderBy('name'),
           startAfter(lastSnapshot),
@@ -2763,6 +2747,7 @@ export default {
       } else {
         itemsQuery = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           where('warehouse_id', '==', warehouseId),
           orderBy('name'),
           limit(limit)
@@ -2816,6 +2801,9 @@ export default {
   },
 
   async loadMoreWarehouseItems({ commit, state, dispatch }, { warehouseId, currentItems = [] }) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     if (state.pagination.isFetching) {
       return { items: [], hasMore: false };
     }
@@ -2894,10 +2882,14 @@ export default {
   },
 
   async getWarehouseItemsCount({ state }, warehouseId) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     try {
       const itemsRef = collection(db, 'items');
       const q = query(
         itemsRef,
+        where('companyId', '==', companyId),          // NEW
         where('warehouse_id', '==', warehouseId)
       );
       const snapshot = await getCountFromServer(q);
@@ -3086,6 +3078,12 @@ export default {
   },
 
   async setupOptimizedRealtimeUpdates({ commit, state }, itemIds) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) {
+      console.warn('setupOptimizedRealtimeUpdates: companyId missing');
+      return;
+    }
+
     if (!state.realtimeMode || !itemIds || itemIds.length === 0) return;
 
     try {
@@ -3109,6 +3107,7 @@ export default {
         const itemsRef = collection(db, 'items');
         const q = query(
           itemsRef,
+          where('companyId', '==', companyId),          // NEW
           where('__name__', 'in', limitedItemIds)
         );
 
@@ -3137,6 +3136,7 @@ export default {
           const unsubscribe = onSnapshot(itemRef, (docSnapshot) => {
             if (docSnapshot.exists()) {
               const data = docSnapshot.data();
+              // No need to check companyId here because we're listening to a specific doc – but if data is stale, it's fine.
               const updatedItem = InventoryService.convertForDisplay({
                 id: docSnapshot.id,
                 ...data
@@ -3163,6 +3163,12 @@ export default {
   },
 
   async setupRealtimeUpdatesForInventory({ commit, state, dispatch }) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) {
+      console.warn('setupRealtimeUpdatesForInventory: companyId missing');
+      return;
+    }
+
     if (!state.realtimeMode || state.inventory.length === 0) return;
 
     try {
@@ -3181,6 +3187,7 @@ export default {
         const unsubscribe = onSnapshot(itemRef, (docSnapshot) => {
           if (docSnapshot.exists()) {
             const data = docSnapshot.data();
+            // Optionally verify companyId, but if we have the doc, it's correct
             const updatedItem = InventoryService.convertForDisplay({
               id: docSnapshot.id,
               ...data
@@ -3210,6 +3217,12 @@ export default {
   },
 
   async setupRealtimeUpdatesForItems({ commit, state }, itemIds) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) {
+      console.warn('setupRealtimeUpdatesForItems: companyId missing');
+      return;
+    }
+
     if (!state.realtimeMode || !itemIds || itemIds.length === 0) return;
 
     try {
@@ -3264,6 +3277,9 @@ export default {
   },
 
   async searchInventory({ commit, state, dispatch }, searchParams) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+
     commit('SET_INVENTORY_LOADING', true);
     commit('SET_INVENTORY_ERROR', null);
     commit('RESET_PAGINATION');
@@ -3300,6 +3316,7 @@ export default {
         if (warehouse) {
           itemsQuery = query(
             itemsRef,
+            where('companyId', '==', companyId),          // NEW
             where('warehouse_id', '==', warehouse),
             orderBy('name'),
             limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
@@ -3307,6 +3324,7 @@ export default {
         } else {
           itemsQuery = query(
             itemsRef,
+            where('companyId', '==', companyId),          // NEW
             orderBy('name'),
             limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
           );
@@ -3318,6 +3336,7 @@ export default {
           if (warehouse) {
             itemsQuery = query(
               itemsRef,
+              where('companyId', '==', companyId),          // NEW
               where('warehouse_id', '==', warehouse),
               orderBy('name'),
               limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
@@ -3325,6 +3344,7 @@ export default {
           } else {
             itemsQuery = query(
               itemsRef,
+              where('companyId', '==', companyId),          // NEW
               orderBy('name'),
               limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
             );
@@ -3335,6 +3355,7 @@ export default {
           if (warehouse && warehousesFilter.includes(warehouse)) {
             itemsQuery = query(
               itemsRef,
+              where('companyId', '==', companyId),          // NEW
               where('warehouse_id', '==', warehouse),
               orderBy('name'),
               limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
@@ -3342,6 +3363,7 @@ export default {
           } else {
             itemsQuery = query(
               itemsRef,
+              where('companyId', '==', companyId),          // NEW
               where('warehouse_id', 'in', warehousesFilter),
               orderBy('name'),
               limit(PERFORMANCE_CONFIG.INITIAL_LOAD)
@@ -3405,6 +3427,9 @@ export default {
   },
 
   async refreshInventorySilently({ commit, state, dispatch }) {
+    const companyId = state.userProfile?.companyId;
+    if (!companyId) return;
+
     try {
       commit('SET_IS_REFRESHING_SILENTLY', true);
       console.log('🔄 تحديث المخزون بصمت...');

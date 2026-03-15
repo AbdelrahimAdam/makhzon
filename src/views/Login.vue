@@ -175,6 +175,16 @@
             </span>
           </button>
         </div>
+
+        <!-- 🔹 NEW: Sign up link -->
+        <div class="mt-4 text-center">
+          <p class="text-xs text-gray-600">
+            ليس لديك حساب؟
+            <router-link to="/signup" class="font-medium text-indigo-600 hover:text-indigo-500">
+              أنشئ حساباً جديداً
+            </router-link>
+          </p>
+        </div>
       </form>
 
       <!-- Support Footer -->
