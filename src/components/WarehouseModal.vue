@@ -153,7 +153,7 @@
           </label>
         </div>
 
-        <!-- Main Warehouse Flag -->
+        <!-- Main Warehouse Flag - Only show for primary warehouses -->
         <div v-if="formData.type === 'primary'">
           <div class="flex items-center">
             <input
@@ -171,6 +171,18 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             المخزن الرئيسي هو المخزن الافتراضي في النظام
           </p>
+        </div>
+
+        <!-- Info for dispatch warehouses -->
+        <div v-if="formData.type === 'dispatch'" class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-4">
+          <div class="flex items-start gap-2">
+            <svg class="w-5 h-5 text-blue-500 dark:text-blue-400 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <p class="text-sm text-blue-700 dark:text-blue-300">
+              موقع الصرف يستخدم لصرف الأصناف للخارج. لا يمكن تعيينه كمخزن رئيسي.
+            </p>
+          </div>
         </div>
 
         <!-- Validation Errors -->
@@ -290,6 +302,14 @@ export default {
         validationErrors.value.push('السعة التخزينية لا يمكن أن تكون سالبة');
       }
 
+      // Additional validation for dispatch warehouses
+      if (formData.value.type === 'dispatch') {
+        // Ensure dispatch warehouses have appropriate naming convention
+        if (!formData.value.id.startsWith('dispatch_') && !props.warehouse) {
+          validationErrors.value.push('يُنصح ببدء معرف موقع الصرف بـ "dispatch_" (مثال: dispatch_main)');
+        }
+      }
+
       return validationErrors.value.length === 0;
     });
 
@@ -321,7 +341,15 @@ export default {
       errorMessage.value = '';
 
       try {
-        // Prepare warehouse data (without timestamps – store will add them)
+        // Get current user's company ID
+        const currentUser = store.state.auth.user;
+        const companyId = currentUser?.companyId;
+
+        if (!companyId) {
+          throw new Error('لا يمكن تحديد الشركة التابع لها المستخدم');
+        }
+
+        // Prepare warehouse data
         const warehouseData = {
           id: formData.value.id.trim(),
           name_ar: formData.value.name_ar.trim(),
@@ -331,13 +359,18 @@ export default {
           location: formData.value.location.trim(),
           description: formData.value.description.trim(),
           status: formData.value.status,
-          is_main: formData.value.is_main || false
+          is_main: formData.value.type === 'primary' ? (formData.value.is_main || false) : false,
+          companyId: companyId, // Explicitly set companyId
+          created_by: currentUser.uid,
+          created_at: new Date().toISOString()
         };
 
         // Check permission using store getter
         if (!store.getters.canManageWarehouses) {
           throw new Error('ليس لديك صلاحية لإدارة المخازن');
         }
+
+        console.log('Creating warehouse with data:', warehouseData); // Debug log
 
         let result;
         if (props.warehouse) {
@@ -347,13 +380,11 @@ export default {
             warehouseData: warehouseData
           });
         } else {
-          // Add new warehouse – the store action will handle existence check
+          // Add new warehouse
           result = await store.dispatch('addWarehouse', warehouseData);
         }
 
         if (result) {
-          // Show success notification (already done in store action)
-          // Emit save event
           emit('save', { ...warehouseData, id: props.warehouse ? props.warehouse.id : warehouseData.id });
           closeModal();
         }
@@ -375,7 +406,7 @@ export default {
         resetForm();
         
         if (props.warehouse) {
-          // Edit mode – populate form with warehouse data (exclude internal fields)
+          // Edit mode – populate form with warehouse data
           formData.value = {
             id: props.warehouse.id,
             name_ar: props.warehouse.name_ar || '',
