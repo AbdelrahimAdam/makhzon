@@ -22,14 +22,13 @@ export default {
         .map(doc => ({
           id: doc.id,
           ...doc.data()
-        }));
-        // REMOVED THE FILTER THAT EXCLUDED DISPATCH WAREHOUSES
-        // .filter(warehouse => {
-        //   return warehouse.type !== 'dispatch';
-        // });
+        }))
+        .filter(warehouse => {
+          return warehouse.type !== 'dispatch';
+        });
 
       commit('SET_WAREHOUSES', warehouses);
-      console.log(`✅ Warehouses loaded: ${warehouses.length}`);
+      console.log(`✅ Warehouses loaded: ${warehouses.length} (dispatch warehouses excluded)`);
 
       return warehouses;
 
@@ -45,7 +44,7 @@ export default {
 
   async getDispatchWarehouses({ dispatch, rootState }) {
     const companyId = rootState.userProfile?.companyId;
-    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
+    if (!companyId) throw new Error('لم يتم العتلقى على معرف الشركة');
 
     try {
       console.log('🔄 Fetching dispatch warehouses from database...');
@@ -173,17 +172,9 @@ export default {
     if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
 
     try {
-      // Check permissions based on user role
-      const userRole = rootState.userProfile?.role;
-      const isSuperAdmin = userRole === 'superadmin';
-      const isCompanyManager = userRole === 'company_manager';
-      const isWarehouseManager = userRole === 'warehouse_manager';
-
-      // Allow superadmins, company managers, and warehouse managers to create warehouses
-      if (!isSuperAdmin && !isCompanyManager && !isWarehouseManager) {
+      if (state.userProfile?.role !== 'superadmin') {
         throw new Error('ليس لديك صلاحية لإضافة مخازن');
       }
-
       commit('SET_OPERATION_LOADING', true);
 
       const warehouseToAdd = {
@@ -191,11 +182,9 @@ export default {
         is_active: true,
         created_at: serverTimestamp(),
         updated_at: serverTimestamp(),
-        created_by: rootState.userProfile?.name || rootState.user?.email,
+        created_by: state.userProfile?.name || state.user?.email,
         companyId: companyId
       };
-
-      console.log('Adding warehouse with data:', warehouseToAdd);
 
       // Use setDoc with the user‑provided ID
       const warehouseRef = doc(db, 'warehouses', warehouseData.id);
@@ -206,19 +195,11 @@ export default {
         ...warehouseToAdd
       };
 
-      // Update both regular warehouses list and dispatch warehouses list if needed
       commit('SET_WAREHOUSES', [...state.warehouses, newWarehouse]);
-      
-      // If this is a dispatch warehouse, also add to dispatch warehouses list
-      if (warehouseData.type === 'dispatch') {
-        // You might want to have a separate state for dispatch warehouses
-        // For now, just log it
-        console.log('Added dispatch warehouse:', newWarehouse);
-      }
 
       dispatch('showNotification', {
         type: 'success',
-        message: `تم إضافة ${warehouseData.type === 'dispatch' ? 'موقع الصرف' : 'المخزن'} "${warehouseData.name_ar}" بنجاح`
+        message: `تم إضافة المخزن "${warehouseData.name_ar}" بنجاح`
       });
 
       return newWarehouse;
@@ -246,14 +227,9 @@ export default {
     if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
 
     try {
-      const userRole = rootState.userProfile?.role;
-      const isSuperAdmin = userRole === 'superadmin';
-      const isCompanyManager = userRole === 'company_manager';
-
-      if (!isSuperAdmin && !isCompanyManager) {
+      if (state.userProfile?.role !== 'superadmin') {
         throw new Error('ليس لديك صلاحية لتعديل المخازن');
       }
-
       commit('SET_OPERATION_LOADING', true);
 
       const warehouseRef = doc(db, 'warehouses', warehouseId);
@@ -266,7 +242,7 @@ export default {
       await updateDoc(warehouseRef, {
         ...warehouseData,
         updated_at: serverTimestamp(),
-        updated_by: rootState.userProfile?.name || rootState.user?.email
+        updated_by: state.userProfile?.name || state.user?.email
       });
 
       const updatedWarehouses = state.warehouses.map(w => 
@@ -276,7 +252,7 @@ export default {
 
       dispatch('showNotification', {
         type: 'success',
-        message: `تم تحديث ${warehouseData.type === 'dispatch' ? 'موقع الصرف' : 'المخزن'} بنجاح`
+        message: `تم تحديث المخزن بنجاح`
       });
 
       return true;
@@ -297,14 +273,9 @@ export default {
     if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
 
     try {
-      const userRole = rootState.userProfile?.role;
-      const isSuperAdmin = userRole === 'superadmin';
-      const isCompanyManager = userRole === 'company_manager';
-
-      if (!isSuperAdmin && !isCompanyManager) {
+      if (state.userProfile?.role !== 'superadmin') {
         throw new Error('ليس لديك صلاحية لحذف المخازن');
       }
-
       commit('SET_OPERATION_LOADING', true);
 
       const warehouseRef = doc(db, 'warehouses', warehouseId);
@@ -314,7 +285,7 @@ export default {
       if (!warehouseDoc.exists()) throw new Error('المخزن غير موجود');
       if (warehouseDoc.data().companyId !== companyId) throw new Error('لا يمكنك حذف هذا المخزن');
 
-      const confirmDelete = confirm(`هل أنت متأكد من حذف ${warehouseDoc.data().type === 'dispatch' ? 'موقع الصرف' : 'المخزن'} "${warehouseName}"؟`);
+      const confirmDelete = confirm(`هل أنت متأكد من حذف المخزن "${warehouseName}"؟`);
       if (!confirmDelete) return;
 
       const itemsRef = collection(db, 'items');
@@ -322,7 +293,7 @@ export default {
       const itemsSnapshot = await getDocs(q);
 
       if (!itemsSnapshot.empty) {
-        throw new Error('لا يمكن حذف هذا المخزن لأنه يحتوي على أصناف. يجب نقل الأصناف أولاً.');
+        throw new Error('لا يمكن حذف المخزن لأنه يحتوي على أصناف. يجب نقل الأصناف أولاً.');
       }
 
       await deleteDoc(warehouseRef);
@@ -332,7 +303,7 @@ export default {
 
       dispatch('showNotification', {
         type: 'success',
-        message: `تم حذف ${warehouseDoc.data().type === 'dispatch' ? 'موقع الصرف' : 'المخزن'} "${warehouseName}" بنجاح`
+        message: `تم حذف المخزن "${warehouseName}" بنجاح`
       });
 
       return true;
