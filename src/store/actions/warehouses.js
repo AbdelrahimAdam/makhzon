@@ -22,13 +22,14 @@ export default {
         .map(doc => ({
           id: doc.id,
           ...doc.data()
-        }))
-        .filter(warehouse => {
-          return warehouse.type !== 'dispatch';
-        });
+        }));
+        // REMOVED THE FILTER THAT EXCLUDED DISPATCH WAREHOUSES
+        // .filter(warehouse => {
+        //   return warehouse.type !== 'dispatch';
+        // });
 
       commit('SET_WAREHOUSES', warehouses);
-      console.log(`✅ Warehouses loaded: ${warehouses.length} (dispatch warehouses excluded)`);
+      console.log(`✅ Warehouses loaded: ${warehouses.length}`);
 
       return warehouses;
 
@@ -44,11 +45,11 @@ export default {
 
   async getDispatchWarehouses({ dispatch, rootState }) {
     const companyId = rootState.userProfile?.companyId;
-    if (!companyId) throw new Error('لم يتم العتلقى على معرف الشركة');
+    if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
 
     try {
       console.log('🔄 Fetching dispatch warehouses from database...');
-      
+
       console.log('⏳ Ensuring Firebase is ready for dispatch warehouses...');
       await ensureFirebaseReady();
       console.log('✅ Firebase ready for dispatch warehouses');
@@ -78,23 +79,23 @@ export default {
       console.log('🔍 Executing dispatch warehouses query...');
       const snapshot = await getDocs(q);
       console.log(`📊 Found ${snapshot.size} dispatch warehouses in database`);
-      
+
       const dispatchWarehouses = [];
-      
+
       snapshot.forEach(doc => {
         try {
           const data = doc.data();
           const warehouseId = doc.id;
-          
+
           console.log(`📋 Warehouse ${warehouseId}:`, {
             name_ar: data.name_ar,
             name: data.name,
             type: data.type,
             is_active: data.is_active
           });
-          
+
           const arabicName = data.name_ar || data.name || warehouseId;
-          
+
           const warehouse = {
             id: warehouseId,
             name_ar: arabicName,
@@ -107,7 +108,7 @@ export default {
             updated_at: data.updated_at,
             ...data
           };
-          
+
           dispatchWarehouses.push(warehouse);
         } catch (docError) {
           console.warn(`⚠️ Error processing warehouse document ${doc.id}:`, docError);
@@ -115,7 +116,7 @@ export default {
       });
 
       console.log(`✅ Dispatch warehouses loaded from database: ${dispatchWarehouses.length}`);
-      
+
       if (dispatchWarehouses.length === 0) {
         console.warn('⚠️ No dispatch warehouses found in database with type="dispatch"');
       }
@@ -125,12 +126,12 @@ export default {
     } catch (error) {
       console.error('❌ Error loading dispatch warehouses:', error);
       console.error('Error stack:', error.stack);
-      
+
       dispatch('showNotification', {
         type: 'error',
         message: `خطأ في تحميل مخازن الصرف: ${error.message || 'يرجى التحقق من اتصال الإنترنت'}`
       });
-      
+
       return [];
     }
   },
@@ -172,9 +173,17 @@ export default {
     if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
 
     try {
-      if (state.userProfile?.role !== 'superadmin') {
+      // Check permissions based on user role
+      const userRole = rootState.userProfile?.role;
+      const isSuperAdmin = userRole === 'superadmin';
+      const isCompanyManager = userRole === 'company_manager';
+      const isWarehouseManager = userRole === 'warehouse_manager';
+
+      // Allow superadmins, company managers, and warehouse managers to create warehouses
+      if (!isSuperAdmin && !isCompanyManager && !isWarehouseManager) {
         throw new Error('ليس لديك صلاحية لإضافة مخازن');
       }
+
       commit('SET_OPERATION_LOADING', true);
 
       const warehouseToAdd = {
@@ -182,9 +191,11 @@ export default {
         is_active: true,
         created_at: serverTimestamp(),
         updated_at: serverTimestamp(),
-        created_by: state.userProfile?.name || state.user?.email,
+        created_by: rootState.userProfile?.name || rootState.user?.email,
         companyId: companyId
       };
+
+      console.log('Adding warehouse with data:', warehouseToAdd);
 
       // Use setDoc with the user‑provided ID
       const warehouseRef = doc(db, 'warehouses', warehouseData.id);
@@ -195,23 +206,31 @@ export default {
         ...warehouseToAdd
       };
 
+      // Update both regular warehouses list and dispatch warehouses list if needed
       commit('SET_WAREHOUSES', [...state.warehouses, newWarehouse]);
+      
+      // If this is a dispatch warehouse, also add to dispatch warehouses list
+      if (warehouseData.type === 'dispatch') {
+        // You might want to have a separate state for dispatch warehouses
+        // For now, just log it
+        console.log('Added dispatch warehouse:', newWarehouse);
+      }
 
       dispatch('showNotification', {
         type: 'success',
-        message: `تم إضافة المخزن "${warehouseData.name_ar}" بنجاح`
+        message: `تم إضافة ${warehouseData.type === 'dispatch' ? 'موقع الصرف' : 'المخزن'} "${warehouseData.name_ar}" بنجاح`
       });
 
       return newWarehouse;
     } catch (error) {
       console.error('❌ Error adding warehouse:', error);
-      
+
       // Provide a user‑friendly message if the error is permission‑denied
       let errorMessage = error.message;
       if (error.code === 'permission-denied') {
         errorMessage = 'لا يمكنك إضافة هذا المخزن. قد يكون المعرف مستخدماً بالفعل في شركة أخرى.';
       }
-      
+
       dispatch('showNotification', {
         type: 'error',
         message: errorMessage || 'خطأ في إضافة المخزن'
@@ -227,13 +246,18 @@ export default {
     if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
 
     try {
-      if (state.userProfile?.role !== 'superadmin') {
+      const userRole = rootState.userProfile?.role;
+      const isSuperAdmin = userRole === 'superadmin';
+      const isCompanyManager = userRole === 'company_manager';
+
+      if (!isSuperAdmin && !isCompanyManager) {
         throw new Error('ليس لديك صلاحية لتعديل المخازن');
       }
+
       commit('SET_OPERATION_LOADING', true);
 
       const warehouseRef = doc(db, 'warehouses', warehouseId);
-      
+
       // Verify warehouse belongs to company
       const warehouseDoc = await getDoc(warehouseRef);
       if (!warehouseDoc.exists()) throw new Error('المخزن غير موجود');
@@ -242,7 +266,7 @@ export default {
       await updateDoc(warehouseRef, {
         ...warehouseData,
         updated_at: serverTimestamp(),
-        updated_by: state.userProfile?.name || state.user?.email
+        updated_by: rootState.userProfile?.name || rootState.user?.email
       });
 
       const updatedWarehouses = state.warehouses.map(w => 
@@ -252,7 +276,7 @@ export default {
 
       dispatch('showNotification', {
         type: 'success',
-        message: `تم تحديث المخزن بنجاح`
+        message: `تم تحديث ${warehouseData.type === 'dispatch' ? 'موقع الصرف' : 'المخزن'} بنجاح`
       });
 
       return true;
@@ -273,19 +297,24 @@ export default {
     if (!companyId) throw new Error('لم يتم العثور على معرف الشركة');
 
     try {
-      if (state.userProfile?.role !== 'superadmin') {
+      const userRole = rootState.userProfile?.role;
+      const isSuperAdmin = userRole === 'superadmin';
+      const isCompanyManager = userRole === 'company_manager';
+
+      if (!isSuperAdmin && !isCompanyManager) {
         throw new Error('ليس لديك صلاحية لحذف المخازن');
       }
+
       commit('SET_OPERATION_LOADING', true);
 
       const warehouseRef = doc(db, 'warehouses', warehouseId);
-      
+
       // Verify warehouse belongs to company
       const warehouseDoc = await getDoc(warehouseRef);
       if (!warehouseDoc.exists()) throw new Error('المخزن غير موجود');
       if (warehouseDoc.data().companyId !== companyId) throw new Error('لا يمكنك حذف هذا المخزن');
 
-      const confirmDelete = confirm(`هل أنت متأكد من حذف المخزن "${warehouseName}"؟`);
+      const confirmDelete = confirm(`هل أنت متأكد من حذف ${warehouseDoc.data().type === 'dispatch' ? 'موقع الصرف' : 'المخزن'} "${warehouseName}"؟`);
       if (!confirmDelete) return;
 
       const itemsRef = collection(db, 'items');
@@ -293,7 +322,7 @@ export default {
       const itemsSnapshot = await getDocs(q);
 
       if (!itemsSnapshot.empty) {
-        throw new Error('لا يمكن حذف المخزن لأنه يحتوي على أصناف. يجب نقل الأصناف أولاً.');
+        throw new Error('لا يمكن حذف هذا المخزن لأنه يحتوي على أصناف. يجب نقل الأصناف أولاً.');
       }
 
       await deleteDoc(warehouseRef);
@@ -303,7 +332,7 @@ export default {
 
       dispatch('showNotification', {
         type: 'success',
-        message: `تم حذف المخزن "${warehouseName}" بنجاح`
+        message: `تم حذف ${warehouseDoc.data().type === 'dispatch' ? 'موقع الصرف' : 'المخزن'} "${warehouseName}" بنجاح`
       });
 
       return true;
