@@ -80,24 +80,10 @@ module.exports = defineConfig({
     }
   },
 
-  // Webpack optimization with TypeScript support
+  // Webpack optimization
   configureWebpack: {
     resolve: {
       extensions: ['.js', '.vue', '.json', '.ts', '.tsx']
-    },
-    module: {
-      rules: [
-        {
-          test: /\.ts$/,
-          loader: 'ts-loader',
-          options: {
-            appendTsSuffixTo: [/\.vue$/],
-            transpileOnly: true,
-            happyPackMode: true
-          },
-          exclude: /node_modules/
-        }
-      ]
     },
     optimization: {
       splitChunks: {
@@ -137,19 +123,6 @@ module.exports = defineConfig({
     // Remove prefetch and preload plugins
     config.plugins.delete('prefetch');
     config.plugins.delete('preload');
-
-    // Add TypeScript support for Vue files
-    config.module
-      .rule('ts')
-      .test(/\.ts$/)
-      .use('ts-loader')
-      .loader('ts-loader')
-      .options({
-        appendTsSuffixTo: [/\.vue$/],
-        transpileOnly: true,
-        happyPackMode: true
-      })
-      .end();
 
     // Configure Vue loader for TypeScript
     config.module
