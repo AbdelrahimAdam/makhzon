@@ -4,10 +4,10 @@ const path = require('path');
 module.exports = defineConfig({
   publicPath: '/',
   outputDir: 'dist',
-  
+
   transpileDependencies: true,
   productionSourceMap: false,
-  
+
   // PWA Configuration
   pwa: {
     name: 'نظام إدارة المخازن - البران للعطور',
@@ -17,8 +17,7 @@ module.exports = defineConfig({
     msTileColor: '#3b82f6',
     appleMobileWebAppCapable: 'yes',
     appleMobileWebAppStatusBarStyle: 'black-translucent',
-    
-    // Use InjectManifest for custom service worker
+
     workboxPluginMode: 'InjectManifest',
     workboxOptions: {
       swSrc: 'public/service-worker.js',
@@ -28,17 +27,15 @@ module.exports = defineConfig({
       cleanupOutdatedCaches: true,
       exclude: [/\.map$/, /manifest\.json$/]
     },
-    
-    // Icon paths - use only the icons you have
+
     iconPaths: {
-      favicon32: 'icons/icon-192x192.png',  // Use 192x192 for favicon32
-      favicon16: 'icons/icon-192x192.png',  // Use 192x192 for favicon16
-      appleTouchIcon: 'icons/icon-192x192.png',  // Use 192x192 for apple touch
-      maskIcon: null,  // No mask icon
-      msTileImage: 'icons/icon-144x144.png'  // Use 144x144 for msTile
+      favicon32: 'icons/icon-192x192.png',
+      favicon16: 'icons/icon-192x192.png',
+      appleTouchIcon: 'icons/icon-192x192.png',
+      maskIcon: null,
+      msTileImage: 'icons/icon-144x144.png'
     },
-    
-    // Manifest options
+
     manifestOptions: {
       name: 'نظام إدارة المخازن - البران للعطور',
       short_name: 'المخزون',
@@ -71,7 +68,7 @@ module.exports = defineConfig({
       ]
     }
   },
-  
+
   // CSS configuration
   css: {
     extract: true,
@@ -82,9 +79,26 @@ module.exports = defineConfig({
       }
     }
   },
-  
-  // Webpack optimization
+
+  // Webpack optimization with TypeScript support
   configureWebpack: {
+    resolve: {
+      extensions: ['.js', '.vue', '.json', '.ts', '.tsx']
+    },
+    module: {
+      rules: [
+        {
+          test: /\.ts$/,
+          loader: 'ts-loader',
+          options: {
+            appendTsSuffixTo: [/\.vue$/],
+            transpileOnly: true,
+            happyPackMode: true
+          },
+          exclude: /node_modules/
+        }
+      ]
+    },
     optimization: {
       splitChunks: {
         chunks: 'all',
@@ -117,13 +131,38 @@ module.exports = defineConfig({
       maxAssetSize: 512000
     }
   },
-  
+
   // Chain webpack for additional configuration
   chainWebpack: config => {
     // Remove prefetch and preload plugins
     config.plugins.delete('prefetch');
     config.plugins.delete('preload');
-    
+
+    // Add TypeScript support for Vue files
+    config.module
+      .rule('ts')
+      .test(/\.ts$/)
+      .use('ts-loader')
+      .loader('ts-loader')
+      .options({
+        appendTsSuffixTo: [/\.vue$/],
+        transpileOnly: true,
+        happyPackMode: true
+      })
+      .end();
+
+    // Configure Vue loader for TypeScript
+    config.module
+      .rule('vue')
+      .use('vue-loader')
+      .tap(options => {
+        options.compilerOptions = {
+          ...options.compilerOptions,
+          isCustomElement: tag => tag.startsWith('ion-')
+        };
+        return options;
+      });
+
     // Optimize HTML
     config.plugin('html').tap(args => {
       args[0] = {
@@ -144,7 +183,7 @@ module.exports = defineConfig({
       };
       return args;
     });
-    
+
     // Handle images
     config.module
       .rule('images')
@@ -154,7 +193,7 @@ module.exports = defineConfig({
         limit: 4096,
         name: 'img/[name].[hash:8].[ext]'
       }));
-      
+
     // Handle fonts
     config.module
       .rule('fonts')
@@ -164,19 +203,17 @@ module.exports = defineConfig({
         limit: 4096,
         name: 'fonts/[name].[hash:8].[ext]'
       }));
-    
-    // Copy plugin configuration - FIXED for your icons
+
+    // Copy plugin configuration
     config.plugin('copy').tap(([options]) => {
-      // Clear existing patterns to avoid conflicts
       options.patterns = [];
-      
-      // Add patterns for specific files that exist
+
       options.patterns.push(
         {
           from: path.resolve(__dirname, 'public/service-worker.js'),
           to: path.resolve(__dirname, 'dist/service-worker.js'),
           toType: 'file',
-          noErrorOnMissing: true // Don't fail if file doesn't exist
+          noErrorOnMissing: true
         },
         {
           from: path.resolve(__dirname, 'public/manifest.json'),
@@ -188,7 +225,7 @@ module.exports = defineConfig({
           from: path.resolve(__dirname, 'public/icons'),
           to: path.resolve(__dirname, 'dist/icons'),
           toType: 'dir',
-          noErrorOnMissing: true // This is key - won't fail if folder doesn't exist
+          noErrorOnMissing: true
         },
         {
           from: path.resolve(__dirname, 'public/favicon.ico'),
@@ -197,11 +234,11 @@ module.exports = defineConfig({
           noErrorOnMissing: true
         }
       );
-      
+
       return [options];
     });
   },
-  
+
   // Dev server configuration
   devServer: {
     host: 'localhost',
